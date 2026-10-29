@@ -179,8 +179,7 @@ async function api(method, path, body) {
     };
   }
 
-  logRequest(method, path, response.status, performance.now() - started);
-
+  const ms = performance.now() - started;
   let data = null;
   if (text) {
     try {
@@ -189,6 +188,8 @@ async function api(method, path, body) {
       data = null;
     }
   }
+  const returnedId = data?.id ?? data?.board?.id;
+  logRequest(method, path, response.status, ms, typeof returnedId === 'string' ? returnedId : null);
 
   if (response.ok) return { ok: true, status: response.status, data, text };
   return { ok: false, status: response.status, problem: toProblem(response, data) };
@@ -612,6 +613,7 @@ for (const preset of PRESETS) {
 
 function placePreset(preset) {
   localEdit(() => {
+    state.cells.fill(0);
     const pw = preset.rows[0].length;
     const ph = preset.rows.length;
     if (pw > state.width || ph > state.height) {
@@ -689,10 +691,6 @@ function formatBig(value) {
 
 function plural(count, one, many) {
   return `${formatBig(count)} ${BigInt(count) === 1n ? one : many}`;
-}
-
-function shortenPath(path) {
-  return path.replace(/(?<=\/boards\/)[0-9a-z]{26}/g, (id) => shortId(id));
 }
 
 // The ID shown for the current board. The stored ID, or the one worked out for an unsaved drawing.
@@ -1002,14 +1000,26 @@ el.speed.addEventListener('input', updateSpeedLabel);
 
 // ---------------------------------------------------------------- API log
 
-function logRequest(method, path, status, ms) {
+// A button showing a short ID that copies the full one.
+function idButton(id) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'log-id';
+  button.dataset.id = id;
+  button.textContent = shortId(id);
+  button.title = `Copy ${id}`;
+  return button;
+}
+
+function logRequest(method, path, status, ms, returnedId) {
   state.logTotal += 1;
   const row = document.createElement('tr');
   const now = new Date();
   const cells = [
     ['l-time', now.toLocaleTimeString('en-GB', { hour12: false })],
     ['l-method', method],
-    ['l-path', shortenPath(path)],
+    ['l-path', ''],
+    ['l-result', ''],
     ['r', ''],
     ['r', Math.round(ms).toLocaleString('en-US')],
   ];
@@ -1019,12 +1029,21 @@ function logRequest(method, path, status, ms) {
     td.textContent = text;
     row.append(td);
   }
-  row.children[2].title = path;
+  // IDs in the path become copy buttons. The rest of the path stays plain text.
+  const pathCell = row.children[2];
+  pathCell.title = path;
+  let last = 0;
+  for (const match of path.matchAll(/(?<=\/boards\/)[0-9a-z]{26}/g)) {
+    pathCell.append(path.slice(last, match.index), idButton(match[0]));
+    last = match.index + match[0].length;
+  }
+  pathCell.append(path.slice(last));
+  if (returnedId) row.children[3].append(idButton(returnedId));
   const pill = document.createElement('span');
   pill.className = 'status-pill';
   pill.dataset.range = String(Math.floor(status / 100));
   pill.textContent = status === 0 ? 'failed' : String(status);
-  row.children[3].append(pill);
+  row.children[4].append(pill);
 
   el.logBody.prepend(row);
   while (el.logBody.children.length > LOG_LIMIT) el.logBody.lastElementChild.remove();
@@ -1052,26 +1071,41 @@ async function checkHealth() {
 
 el.health.addEventListener('click', checkHealth);
 
-el.copyId.addEventListener('click', async () => {
-  const id = shownId();
-  if (!id) return;
-  let copied = false;
+// Copies text, or when clipboard access is refused, shows it in target and selects it to copy by hand.
+async function copyText(text, target) {
   try {
-    await navigator.clipboard.writeText(id);
-    copied = true;
+    await navigator.clipboard.writeText(text);
+    return true;
   } catch {
-    // Clipboard access can be refused. Fall back to selecting the full ID so it can be copied by hand.
-    el.boardId.textContent = id;
+    target.textContent = text;
     const range = document.createRange();
-    range.selectNodeContents(el.boardId);
+    range.selectNodeContents(target);
     const selection = window.getSelection();
     selection.removeAllRanges();
     selection.addRange(range);
+    return false;
   }
+}
+
+el.copyId.addEventListener('click', async () => {
+  const id = shownId();
+  if (!id) return;
+  const copied = await copyText(id, el.boardId);
   el.copyId.textContent = copied ? 'Copied' : 'ID selected';
   setTimeout(() => {
     el.copyId.textContent = 'Copy ID';
   }, 1500);
+});
+
+el.logBody.addEventListener('click', async (event) => {
+  const button = event.target.closest('.log-id');
+  if (!button) return;
+  const id = button.dataset.id;
+  if (!(await copyText(id, button))) return;
+  button.textContent = 'Copied';
+  setTimeout(() => {
+    button.textContent = shortId(id);
+  }, 1200);
 });
 
 // ---------------------------------------------------------------- Wiring

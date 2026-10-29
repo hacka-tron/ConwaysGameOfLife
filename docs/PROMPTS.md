@@ -235,3 +235,11 @@ also the whole UI flickers when I click the button, why is that? can we avoid th
 ```
 
 The flicker was traced and fixed in plain JavaScript and CSS, without a framework.
+
+### 31
+
+```text
+ok last thing, but the patterns should clear the board and paste the pattern, and you should let people copy the ids from the API calls
+```
+
+Patterns now replace the board instead of adding to it, and board IDs in the API log can be copied with a click.
