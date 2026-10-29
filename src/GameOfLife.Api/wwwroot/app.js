@@ -608,6 +608,7 @@ function localEdit(action) {
   if (editingLocked()) return;
   if (state.playing) stopPlay('Playback paused because the board was edited.');
   hideMsg(el.boardMsg);
+  hideMsg(el.loadMsg);
   action();
   boardEdited();
 }
@@ -853,6 +854,7 @@ async function fetchNext() {
 
 function nextGeneration() {
   hideMsg(el.opsMsg);
+  hideMsg(el.loadMsg);
   return runBusy(el.next, async () => {
     const s = await ensureStored(el.opsMsg);
     if (!s) return;
@@ -867,6 +869,7 @@ function nextGeneration() {
 
 function jumpAhead() {
   hideMsg(el.opsMsg);
+  hideMsg(el.loadMsg);
   const raw = el.jumpN.value.trim().replace(/[,_\s]/g, '');
   if (!/^\d+$/.test(raw)) {
     el.jumpN.setAttribute('aria-invalid', 'true');
@@ -892,6 +895,7 @@ function jumpAhead() {
 
 function findFinal() {
   hideMsg(el.opsMsg);
+  hideMsg(el.loadMsg);
   return runBusy(el.final, async () => {
     const s = await ensureStored(el.opsMsg);
     if (!s) return;
@@ -960,6 +964,7 @@ function currentDelay() {
 async function startPlay() {
   if (state.busy) return;
   hideMsg(el.opsMsg);
+  hideMsg(el.loadMsg);
   if (!canOperate()) {
     // Save the drawing first. Editing is locked while busy, so the board cannot change during the save.
     await runBusy(el.play, () => ensureStored(el.opsMsg));
