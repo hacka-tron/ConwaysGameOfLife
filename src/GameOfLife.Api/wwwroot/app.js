@@ -609,6 +609,7 @@ function localEdit(action) {
   if (state.playing) stopPlay('Playback paused because the board was edited.');
   hideMsg(el.boardMsg);
   hideMsg(el.loadMsg);
+  hideFinal();
   action();
   boardEdited();
 }
@@ -824,6 +825,7 @@ function enteredId() {
 function loadById() {
   if (state.playing) stopPlay();
   hideMsg(el.loadMsg);
+  hideFinal();
   hideMsg(el.opsMsg);
   const id = enteredId();
   if (!id) {
@@ -855,6 +857,7 @@ async function fetchNext() {
 function nextGeneration() {
   hideMsg(el.opsMsg);
   hideMsg(el.loadMsg);
+  hideFinal();
   return runBusy(el.next, async () => {
     const s = await ensureStored(el.opsMsg);
     if (!s) return;
@@ -870,6 +873,7 @@ function nextGeneration() {
 function jumpAhead() {
   hideMsg(el.opsMsg);
   hideMsg(el.loadMsg);
+  hideFinal();
   const raw = el.jumpN.value.trim().replace(/[,_\s]/g, '');
   if (!/^\d+$/.test(raw)) {
     el.jumpN.setAttribute('aria-invalid', 'true');
@@ -896,6 +900,7 @@ function jumpAhead() {
 function findFinal() {
   hideMsg(el.opsMsg);
   hideMsg(el.loadMsg);
+  hideFinal();
   return runBusy(el.final, async () => {
     const s = await ensureStored(el.opsMsg);
     if (!s) return;
@@ -921,6 +926,12 @@ function findFinal() {
 function finalCellSize(board) {
   const fit = Math.min(300 / board.width, 180 / board.height);
   return fit >= 2 ? Math.min(12, Math.floor(fit)) : Math.max(0.5, fit);
+}
+
+// The Final state panel describes one Find final state result, so anything that changes the board hides it.
+function hideFinal() {
+  el.finalCard.hidden = true;
+  finalBoard = null;
 }
 
 function showFinal(data, fromId) {
@@ -965,6 +976,7 @@ async function startPlay() {
   if (state.busy) return;
   hideMsg(el.opsMsg);
   hideMsg(el.loadMsg);
+  hideFinal();
   if (!canOperate()) {
     // Save the drawing first. Editing is locked while busy, so the board cannot change during the save.
     await runBusy(el.play, () => ensureStored(el.opsMsg));
