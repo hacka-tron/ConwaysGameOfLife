@@ -351,3 +351,11 @@ the load board features load the board before I press teh load board button
 ```
 
 Typing or pasting an ID no longer loads it. Boards load only from the Load board button or Enter.
+
+### 44
+
+```text
+also teh final state section doesn't clear when I start a new run, make sure that clears when its done
+```
+
+The Final state panel now hides when the board is edited, loaded, stepped, jumped or played, so it only shows for the latest Find final state.
