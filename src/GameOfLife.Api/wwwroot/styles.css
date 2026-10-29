@@ -847,6 +847,25 @@ input {
   color: var(--muted);
 }
 
+.log-table .l-result {
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+.log-id {
+  padding: 1px 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--surface-2);
+  color: inherit;
+  font: inherit;
+  cursor: copy;
+}
+
+.log-id:hover {
+  border-color: var(--accent);
+}
+
 .l-method {
   font-family: var(--mono);
   font-size: 12px;
