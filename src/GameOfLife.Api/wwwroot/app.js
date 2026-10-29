@@ -1141,11 +1141,7 @@ el.loadForm.addEventListener('submit', (event) => {
   event.preventDefault();
   if (!el.load.disabled) loadById();
 });
-el.loadId.addEventListener('input', () => {
-  el.loadId.removeAttribute('aria-invalid');
-  // Load as soon as a complete ID is pasted or typed. Enter loads anything else, to show why it fails.
-  if (new RegExp(`^[${ID_ALPHABET}]{${ID_LENGTH}}$`).test(enteredId())) loadById();
-});
+el.loadId.addEventListener('input', () => el.loadId.removeAttribute('aria-invalid'));
 
 function retheme() {
   colors = readColors();

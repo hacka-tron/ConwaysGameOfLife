@@ -343,3 +343,11 @@ when we run a new options, clear teh error in the load by id section
 ```
 
 The README was cut down to what a reviewer needs, and running an operation or editing the board now clears the message in the Load by ID panel.
+
+### 43
+
+```text
+the load board features load the board before I press teh load board button
+```
+
+Typing or pasting an ID no longer loads it. Boards load only from the Load board button or Enter.
