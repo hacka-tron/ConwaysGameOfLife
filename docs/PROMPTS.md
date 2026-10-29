@@ -333,3 +333,13 @@ also the board section and the area at the top of the board show the same inform
 ```
 
 Size and edge rule were removed from the bar above the board, since the Board panel already shows them. Live cell count and generation stay.
+
+### 42
+
+```text
+a couple more things:
+The readme has too much fluff, so just add the details a reviewer would care about
+when we run a new options, clear teh error in the load by id section
+```
+
+The README was cut down to what a reviewer needs, and running an operation or editing the board now clears the message in the Load by ID panel.
