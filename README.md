@@ -112,6 +112,12 @@ All limits live in `src/GameOfLife.Api/appsettings.json` and can be overridden w
 
 A 256 x 256 board takes under a millisecond per generation on an Apple Silicon laptop. A random 256 x 256 board measured during development took 2,356 generations and 1.7 seconds to settle, and asking again took 9 ms. The worst case at the default limits is about 7 seconds of work, and requests stop early if the client disconnects.
 
+### Known limits
+
+- The first request for a far generation or a final state on a new board computes on the request thread, for up to `MaxSteps` generations. There is no cap on concurrent requests, so several slow requests at once compete for CPU. Rate limiting or a work queue would fix this in production.
+- With `Wrap` edges, a board one or two cells wide counts the same cell as a neighbour more than once, the way a torus that small works mathematically. A single live cell on a 1 x 1 wrapped board therefore has 8 live neighbours and dies.
+- LMDB allows 126 concurrent readers by default. Reads take microseconds, so this is far beyond what one instance would reach, but it is a setting to raise under heavy load.
+
 ### Code layout
 
 ```
