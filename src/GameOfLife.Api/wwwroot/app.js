@@ -96,11 +96,8 @@ const el = {
   random: $('random'),
   presets: $('presets'),
   boardMsg: $('board-msg'),
-  upload: $('upload'),
-  uploadMsg: $('upload-msg'),
   loadForm: $('load-form'),
   loadId: $('load-id'),
-  load: $('load'),
   loadMsg: $('load-msg'),
   opsHint: $('ops-hint'),
   next: $('next'),
@@ -133,8 +130,8 @@ const state = {
   width: 40,
   height: 28,
   cells: new Uint8Array(40 * 28),
-  // The board last returned by the server. Null until the first upload.
-  // gen is a BigInt counting generations since the last upload, or null when unknown.
+  // The board last returned by the server. Null until the first save or load.
+  // gen is a BigInt counting generations since the last save or load, or null when unknown.
   stored: null,
   edited: false,
   busy: false,
@@ -755,9 +752,8 @@ function updateUI() {
     : 'The drawn board is saved automatically the first time you run an operation on it.';
 
   const idle = !state.busy;
-  el.upload.disabled = state.busy && !state.playing;
-  el.load.disabled = state.busy && !state.playing;
-  el.upload.textContent = s && !state.edited ? 'Upload board again' : 'Upload board';
+  // Read-only rather than disabled, so the field keeps focus while a load runs.
+  el.loadId.readOnly = state.busy && !state.playing;
   el.next.disabled = !idle;
   el.final.disabled = !idle;
   el.jump.disabled = !idle;
@@ -804,7 +800,7 @@ async function saveBoard(target) {
     showProblem(target, badResponse(result.status));
     return null;
   }
-  setCurrent(result.data, { via: 'upload', gen: 0n });
+  setCurrent(result.data, { via: 'saved', gen: 0n });
   return result;
 }
 
@@ -814,40 +810,28 @@ async function ensureStored(target) {
   return (await saveBoard(target)) ? state.stored : null;
 }
 
-function upload() {
-  if (state.playing) stopPlay();
-  hideMsg(el.uploadMsg);
-  hideMsg(el.opsMsg);
-  return runBusy(el.upload, async () => {
-    const result = await saveBoard(el.uploadMsg);
-    if (!result) return;
-    const id = shortId(result.data.id);
-    if (result.status === 201) {
-      showInfo(el.uploadMsg, `Stored as a new board with ID ${id}. The server answered 201 Created.`, 'success');
-    } else {
-      showInfo(
-        el.uploadMsg,
-        `This exact board was already stored, so the server returned its existing ID ${id} with 200 OK.`,
-        'success',
-      );
-    }
-  });
+// IDs are lowercase, but pasted ones may not be. Crockford base32 treats case as insignificant.
+function enteredId() {
+  return el.loadId.value.trim().toLowerCase();
 }
 
 function loadById() {
   if (state.playing) stopPlay();
   hideMsg(el.loadMsg);
   hideMsg(el.opsMsg);
-  // IDs are lowercase, but pasted ones may not be. Crockford base32 treats case as insignificant.
-  const id = el.loadId.value.trim().toLowerCase();
+  const id = enteredId();
   if (!id) {
     el.loadId.setAttribute('aria-invalid', 'true');
     showProblem(el.loadMsg, { status: 0, title: 'No ID entered', detail: 'Paste the ID of a stored board.', errors: null });
     return;
   }
   el.loadId.removeAttribute('aria-invalid');
-  return runBusy(el.load, async () => {
+  return runBusy(null, async () => {
     const result = await api('GET', `/boards/${encodeURIComponent(id)}`);
+    if (result.status === 404) {
+      result.problem.detail =
+        'No board with this ID is stored. An ID is a one-way hash of a board, so the board cannot be rebuilt from it. Draw the board and run an operation to store it.';
+    }
     if (!result.ok) return showProblem(el.loadMsg, result.problem);
     if (!isBoardResponse(result.data)) return showProblem(el.loadMsg, badResponse(result.status));
     setCurrent(result.data, { via: 'load', gen: 0n });
@@ -1206,7 +1190,6 @@ el.copyId.addEventListener('click', async () => {
 
 // ---------------------------------------------------------------- Wiring
 
-el.upload.addEventListener('click', upload);
 el.next.addEventListener('click', nextGeneration);
 el.final.addEventListener('click', findFinal);
 el.jumpForm.addEventListener('submit', (event) => {
@@ -1216,9 +1199,13 @@ el.jumpForm.addEventListener('submit', (event) => {
 el.jumpN.addEventListener('input', () => el.jumpN.removeAttribute('aria-invalid'));
 el.loadForm.addEventListener('submit', (event) => {
   event.preventDefault();
-  if (!el.load.disabled) loadById();
+  if (!el.loadId.readOnly) loadById();
 });
-el.loadId.addEventListener('input', () => el.loadId.removeAttribute('aria-invalid'));
+el.loadId.addEventListener('input', () => {
+  el.loadId.removeAttribute('aria-invalid');
+  // Load as soon as a complete ID is pasted or typed. Enter loads anything else, to show why it fails.
+  if (new RegExp(`^[${ID_ALPHABET}]{${ID_LENGTH}}$`).test(enteredId())) loadById();
+});
 
 function retheme() {
   colors = readColors();

@@ -75,24 +75,21 @@
         <div class="msg" id="board-msg" role="status" aria-live="polite" hidden></div>
       </section>
 
-      <section class="card" aria-labelledby="h-upload">
-        <h2 id="h-upload">Upload</h2>
-        <p class="hint">Sends the drawn board to <code>POST /boards</code>. Optional, since operations save the board on their own. Identical boards always get the same ID.</p>
-        <button type="button" class="btn btn-primary btn-block" id="upload">Upload board</button>
-        <div class="msg" id="upload-msg" role="status" aria-live="polite" hidden></div>
-        <form class="jump load" id="load-form" novalidate>
+      <section class="card" aria-labelledby="h-load">
+        <h2 id="h-load">Load by ID</h2>
+        <form class="jump" id="load-form" novalidate>
           <label class="field field-grow">
-            <span>Or load a stored board by ID</span>
-            <input type="text" id="load-id" placeholder="Paste a board ID" autocomplete="off" spellcheck="false">
+            <span>Board ID</span>
+            <input type="text" id="load-id" placeholder="Paste a board ID" autocomplete="off" spellcheck="false" aria-describedby="load-hint">
           </label>
-          <button type="submit" class="btn" id="load">Load</button>
         </form>
+        <p class="hint" id="load-hint">The board loads as soon as a full ID is entered. Drawn boards are saved the first time you run an operation on them.</p>
         <div class="msg" id="load-msg" role="status" aria-live="polite" hidden></div>
       </section>
 
       <section class="card" aria-labelledby="h-ops">
         <h2 id="h-ops">Operations</h2>
-        <p class="hint" id="ops-hint">Upload the board to run operations on it.</p>
+        <p class="hint" id="ops-hint">The drawn board is saved automatically the first time you run an operation on it.</p>
         <div class="op-grid">
           <button type="button" class="btn" id="next" disabled>Next generation</button>
           <button type="button" class="btn" id="final" disabled>Find final state</button>
