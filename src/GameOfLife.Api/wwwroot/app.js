@@ -145,8 +145,11 @@ const state = {
   lastSeen: new Map(),
   currentSeq: null,
   logTotal: 0,
-  // Edge rule the server gives new uploads, read from GET /settings. It is part of every board ID.
-  edgeMode: 'dead',
+  // Edge rule the server gives new uploads, read from GET /settings. It is part of every board ID,
+  // so drawn boards get no ID until it is known.
+  edgeMode: null,
+  // True when the browser cannot work out IDs, because settings failed to load or hashing is unavailable.
+  idUnavailable: false,
   // ID of the drawn board, worked out in the browser. Null while it is being computed.
   localId: null,
   idRequest: 0,
@@ -272,8 +275,18 @@ async function refreshLocalId() {
   const request = ++state.idRequest;
   const { width, height, edgeMode } = state;
   const cells = state.cells.slice();
+  // Cleared before hashing so Copy ID never offers the previous drawing's ID.
   state.localId = null;
-  const id = await computeId(width, height, edgeMode, cells);
+  if (!edgeMode) return null;
+  let id;
+  try {
+    id = await computeId(width, height, edgeMode, cells);
+  } catch {
+    // crypto.subtle only exists on https and localhost. Operations still work, since the server assigns IDs.
+    state.idUnavailable = true;
+    updateUI();
+    return null;
+  }
   // A later edit started its own computation. Keep only the newest.
   if (request !== state.idRequest) return null;
   state.localId = id;
@@ -282,7 +295,14 @@ async function refreshLocalId() {
 }
 
 async function checkServerId(board) {
-  const local = await computeId(board.width, board.height, board.edgeMode, fromRows(board.cells, board.width, board.height));
+  let local;
+  try {
+    local = await computeId(board.width, board.height, board.edgeMode, fromRows(board.cells, board.width, board.height));
+  } catch {
+    return;
+  }
+  // Skip boards that are no longer current by the time the hash finishes.
+  if (state.stored?.id !== board.id) return;
   if (local !== board.id) {
     showInfo(
       el.boardMsg,
@@ -345,8 +365,8 @@ function boardEdited() {
   const s = state.stored;
   state.edited = !s || s.width !== state.width || s.height !== state.height || !sameCells(s.cells, state.cells);
   scheduleDraw();
-  updateUI();
   refreshLocalId();
+  updateUI();
 }
 
 function setCurrent(board, { via, gen, seq }) {
@@ -705,7 +725,7 @@ function updateUI() {
   if (!operable) {
     el.stateBadge.dataset.kind = s ? 'edited' : 'draft';
     el.stateBadge.textContent = 'Not saved yet';
-    el.boardId.textContent = state.localId ? shortId(state.localId) : 'Working out ID';
+    el.boardId.textContent = state.localId ? shortId(state.localId) : state.idUnavailable ? 'ID unavailable' : 'Working out ID';
     el.boardId.title = state.localId ? `${state.localId}. Saved automatically when you run an operation.` : '';
     el.boardId.classList.remove('is-stored');
   } else {
@@ -818,7 +838,8 @@ function loadById() {
   if (state.playing) stopPlay();
   hideMsg(el.loadMsg);
   hideMsg(el.opsMsg);
-  const id = el.loadId.value.trim();
+  // IDs are lowercase, but pasted ones may not be. Crockford base32 treats case as insignificant.
+  const id = el.loadId.value.trim().toLowerCase();
   if (!id) {
     el.loadId.setAttribute('aria-invalid', 'true');
     showProblem(el.loadMsg, { status: 0, title: 'No ID entered', detail: 'Paste the ID of a stored board.', errors: null });
@@ -951,6 +972,7 @@ async function startPlay() {
   if (state.busy) return;
   hideMsg(el.opsMsg);
   if (!canOperate()) {
+    // Save the drawing first. Editing is locked while busy, so the board cannot change during the save.
     await runBusy(el.play, () => ensureStored(el.opsMsg));
     if (!canOperate() || state.busy) return;
   }
@@ -1223,7 +1245,12 @@ window.addEventListener('resize', layoutCanvas);
 
 async function loadSettings() {
   const result = await api('GET', '/settings');
-  if (!result.ok || typeof result.data?.edgeMode !== 'string') return;
+  if (!result.ok || typeof result.data?.edgeMode !== 'string') {
+    // Guessing the edge rule could show an ID the server would not assign, so show none.
+    state.idUnavailable = true;
+    updateUI();
+    return;
+  }
   state.edgeMode = result.data.edgeMode;
   if (!canOperate()) refreshLocalId();
 }
