@@ -80,6 +80,7 @@ const el = {
   stateBadge: $('state-badge'),
   boardId: $('board-id'),
   copyId: $('copy-id'),
+  copyIdLabel: $('copy-id-label'),
   metaSize: $('meta-size'),
   metaAlive: $('meta-alive'),
   metaGenWrap: $('meta-gen-wrap'),
@@ -100,7 +101,6 @@ const el = {
   loadForm: $('load-form'),
   loadId: $('load-id'),
   loadMsg: $('load-msg'),
-  opsHint: $('ops-hint'),
   next: $('next'),
   final: $('final'),
   jumpForm: $('jump-form'),
@@ -728,17 +728,19 @@ function updateUI() {
   el.metaGenWrap.hidden = !operable || s.gen === null;
   if (operable && s.gen !== null) el.metaGen.textContent = formatBig(s.gen);
   el.metaEdgeWrap.hidden = !operable;
-  if (operable) el.metaEdge.textContent = s.edgeMode === 'wrap' ? 'wrap around' : String(s.edgeMode || 'dead');
+  if (operable) {
+    const wrap = s.edgeMode === 'wrap';
+    el.metaEdge.textContent = wrap ? 'wrap around' : 'dead';
+    el.metaEdgeWrap.title = wrap
+      ? 'Opposite edges join, so a cell on the right edge neighbours the cell on the left edge.'
+      : 'Cells beyond the border always count as dead.';
+  }
 
   el.boardFoot.classList.toggle('is-edited', state.edited && Boolean(s));
   el.draftNote.textContent =
     state.edited && s
       ? 'This board has changed since it was stored. Running an operation saves it first.'
       : 'Click or drag to toggle cells. Dragging paints the opposite of the first cell you touch.';
-
-  el.opsHint.textContent = operable
-    ? 'Each result becomes the current board.'
-    : 'The drawn board is saved automatically the first time you run an operation on it.';
 
   const idle = !state.showBusy && !state.playing;
   // Read-only rather than disabled, so the field keeps focus while a load runs.
@@ -1006,8 +1008,9 @@ function idButton(id) {
   button.type = 'button';
   button.className = 'log-id';
   button.dataset.id = id;
-  button.textContent = shortId(id);
   button.title = `Copy ${id}`;
+  button.append(el.copyId.querySelector('.icon-copy').cloneNode(true), document.createElement('span'));
+  button.lastChild.textContent = shortId(id);
   return button;
 }
 
@@ -1091,9 +1094,9 @@ el.copyId.addEventListener('click', async () => {
   const id = shownId();
   if (!id) return;
   const copied = await copyText(id, el.boardId);
-  el.copyId.textContent = copied ? 'Copied' : 'ID selected';
+  el.copyIdLabel.textContent = copied ? 'Copied' : 'ID selected';
   setTimeout(() => {
-    el.copyId.textContent = 'Copy ID';
+    el.copyIdLabel.textContent = 'Copy ID';
   }, 1500);
 });
 
@@ -1101,10 +1104,11 @@ el.logBody.addEventListener('click', async (event) => {
   const button = event.target.closest('.log-id');
   if (!button) return;
   const id = button.dataset.id;
-  if (!(await copyText(id, button))) return;
-  button.textContent = 'Copied';
+  const label = button.lastChild;
+  if (!(await copyText(id, label))) return;
+  label.textContent = 'Copied';
   setTimeout(() => {
-    button.textContent = shortId(id);
+    label.textContent = shortId(id);
   }, 1200);
 });
 

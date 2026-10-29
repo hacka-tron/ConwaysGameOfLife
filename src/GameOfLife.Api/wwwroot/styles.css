@@ -604,6 +604,14 @@ input {
   fill: currentColor;
 }
 
+.icon-copy {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+
 .btn-play .icon-pause,
 .btn-play[aria-pressed="true"] .icon-play {
   display: none;
@@ -852,6 +860,13 @@ input {
   font-size: 12.5px;
 }
 
+.log-id,
+.btn-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .log-id {
   padding: 1px 4px;
   border: 1px solid var(--border);
@@ -859,7 +874,7 @@ input {
   background: var(--surface-2);
   color: inherit;
   font: inherit;
-  cursor: copy;
+  cursor: pointer;
 }
 
 .log-id:hover {
