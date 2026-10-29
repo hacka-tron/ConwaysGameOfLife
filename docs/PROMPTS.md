@@ -243,3 +243,17 @@ ok last thing, but the patterns should clear the board and paste the pattern, an
 ```
 
 Patterns now replace the board instead of adding to it, and board IDs in the API log can be copied with a click.
+
+### 32
+
+```text
+a couple more things:
+```
+
+```text
+the copy mouse hover looks weird, pick one with the standard copy logo
+the screen resizes in the operations section based on if the board is saved or not. we already have the text under the chart so that is good enough
+what does edges:dead mean
+```
+
+The log's copy buttons got a standard copy icon and a normal pointer, the changing hint in the Operations panel was removed so the layout stays still, and the edge rule was explained.
