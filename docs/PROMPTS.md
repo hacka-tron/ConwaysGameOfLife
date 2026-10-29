@@ -293,3 +293,43 @@ default to dead if the user doesn't specificify
 ```
 
 Uploads without an edge rule use dead edges, through the DefaultEdgeMode setting, and the browser toggle starts on dead.
+
+### 37
+
+```text
+https://github.com/hacka-tron/ConwaysGameOfLife also this is the repo, when you are done I want you to push our changes there
+```
+
+The finished work was pushed to the GitHub repository.
+
+### 38
+
+```text
+and create a Readme with the instructions to run this locally
+```
+
+The README got a fuller section on running the project locally, covering prerequisites, cloning, the browser UI, tests and settings.
+
+### 39
+
+```text
+and to give a general overview of what I built
+```
+
+An overview section at the top of the README now summarizes what the project does and how it is built.
+
+### 40
+
+```text
+and then in teh docs/ folder you can put the prompts list and an architecture document
+```
+
+The design sections moved out of the README into docs/ARCHITECTURE.md, next to the prompt log in docs/PROMPTS.md.
+
+### 41
+
+```text
+also the board section and the area at the top of the board show the same information, so remove the details from teh top of the board
+```
+
+Size and edge rule were removed from the bar above the board, since the Board panel already shows them. Live cell count and generation stay.

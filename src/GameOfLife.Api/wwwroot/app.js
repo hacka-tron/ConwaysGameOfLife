@@ -83,12 +83,9 @@ const el = {
   copyIdLabel: $('copy-id-label'),
   edgeInputs: document.querySelectorAll('#edge-modes input'),
   load: $('load'),
-  metaSize: $('meta-size'),
   metaAlive: $('meta-alive'),
   metaGenWrap: $('meta-gen-wrap'),
   metaGen: $('meta-gen'),
-  metaEdgeWrap: $('meta-edge-wrap'),
-  metaEdge: $('meta-edge'),
   stage: $('stage'),
   canvas: $('board'),
   boardFoot: document.querySelector('.board-foot'),
@@ -744,15 +741,9 @@ function updateUI() {
   }
   el.copyId.hidden = !shownId();
 
-  el.metaSize.textContent = `${state.width} × ${state.height}`;
   el.metaAlive.textContent = population(state.cells).toLocaleString('en-US');
   el.metaGenWrap.hidden = !operable || s.gen === null;
   if (operable && s.gen !== null) el.metaGen.textContent = formatBig(s.gen);
-  const wrap = state.edgeMode === 'wrap';
-  el.metaEdge.textContent = wrap ? 'wrap around' : 'dead';
-  el.metaEdgeWrap.title = wrap
-    ? 'Opposite edges join, so a cell on the right edge neighbours the cell on the left edge.'
-    : 'Cells beyond the border always count as dead.';
 
   el.boardFoot.classList.toggle('is-edited', state.edited && Boolean(s));
   el.draftNote.textContent =
