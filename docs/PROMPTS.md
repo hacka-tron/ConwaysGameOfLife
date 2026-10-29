@@ -163,3 +163,11 @@ ok can you run it so I can test it out
 ```
 
 The API was started locally so the owner could try the browser UI and the endpoints by hand.
+
+### 22
+
+```text
+this is good, but there is no option to manually enter an id. also these ids are very long, is there a better way to make them shorter?
+```
+
+A field was added to the browser UI for loading a board by ID, and shorter ID formats were weighed.

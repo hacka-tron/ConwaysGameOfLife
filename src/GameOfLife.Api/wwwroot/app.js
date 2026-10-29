@@ -98,6 +98,10 @@ const el = {
   boardMsg: $('board-msg'),
   upload: $('upload'),
   uploadMsg: $('upload-msg'),
+  loadForm: $('load-form'),
+  loadId: $('load-id'),
+  load: $('load'),
+  loadMsg: $('load-msg'),
   opsHint: $('ops-hint'),
   next: $('next'),
   final: $('final'),
@@ -675,6 +679,7 @@ function updateUI() {
 
   const idle = !state.busy;
   el.upload.disabled = state.busy && !state.playing;
+  el.load.disabled = state.busy && !state.playing;
   el.upload.textContent = s && !state.edited ? 'Upload board again' : 'Upload board';
   el.next.disabled = !operable || !idle;
   el.final.disabled = !operable || !idle;
@@ -729,6 +734,26 @@ function upload() {
         'success',
       );
     }
+  });
+}
+
+function loadById() {
+  if (state.playing) stopPlay();
+  hideMsg(el.loadMsg);
+  hideMsg(el.opsMsg);
+  const id = el.loadId.value.trim();
+  if (!id) {
+    el.loadId.setAttribute('aria-invalid', 'true');
+    showProblem(el.loadMsg, { status: 0, title: 'No ID entered', detail: 'Paste the ID of a stored board.', errors: null });
+    return;
+  }
+  el.loadId.removeAttribute('aria-invalid');
+  return runBusy(el.load, async () => {
+    const result = await api('GET', `/boards/${encodeURIComponent(id)}`);
+    if (!result.ok) return showProblem(el.loadMsg, result.problem);
+    if (!isBoardResponse(result.data)) return showProblem(el.loadMsg, badResponse(result.status));
+    setCurrent(result.data, { via: 'load', gen: 0n });
+    showInfo(el.loadMsg, `Loaded board ${shortId(result.data.id)} from the server.`, 'success');
   });
 }
 
@@ -1083,6 +1108,11 @@ el.jumpForm.addEventListener('submit', (event) => {
   if (!el.jump.disabled) jumpAhead();
 });
 el.jumpN.addEventListener('input', () => el.jumpN.removeAttribute('aria-invalid'));
+el.loadForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  if (!el.load.disabled) loadById();
+});
+el.loadId.addEventListener('input', () => el.loadId.removeAttribute('aria-invalid'));
 
 function retheme() {
   colors = readColors();

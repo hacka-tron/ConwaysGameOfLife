@@ -153,6 +153,16 @@ public sealed class BoardsApiTests : IDisposable
         Assert.Equal("Healthy", await _client.GetStringAsync("/health"));
     }
 
+    [Fact]
+    public async Task BrowserUiIsServedWithoutStaleCaching()
+    {
+        var response = await _client.GetAsync("/");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.True(response.Headers.CacheControl!.NoCache);
+        Assert.Contains("id=\"load-form\"", await response.Content.ReadAsStringAsync());
+    }
+
     private async Task<BoardResponse> UploadAsync(string[] rows)
     {
         var response = await _client.PostAsJsonAsync("/boards", Upload(rows));

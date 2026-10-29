@@ -80,6 +80,14 @@
         <p class="hint">Sends the drawn board to <code>POST /boards</code>. Identical boards always get the same ID.</p>
         <button type="button" class="btn btn-primary btn-block" id="upload">Upload board</button>
         <div class="msg" id="upload-msg" role="status" aria-live="polite" hidden></div>
+        <form class="jump load" id="load-form" novalidate>
+          <label class="field field-grow">
+            <span>Or load a stored board by ID</span>
+            <input type="text" id="load-id" placeholder="Paste a board ID" autocomplete="off" spellcheck="false">
+          </label>
+          <button type="submit" class="btn" id="load">Load</button>
+        </form>
+        <div class="msg" id="load-msg" role="status" aria-live="polite" hidden></div>
       </section>
 
       <section class="card" aria-labelledby="h-ops">
