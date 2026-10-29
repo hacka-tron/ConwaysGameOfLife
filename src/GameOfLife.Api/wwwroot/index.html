@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Game of Life API</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 3 3'%3E%3Cpath fill='%232563eb' d='M1 0h1v1H1zM2 1h1v1H2zM0 2h3v1H0z'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 3 3" aria-hidden="true">
+        <path d="M1 0h1v1H1zM2 1h1v1H2zM0 2h3v1H0z" />
+      </svg>
+      <div>
+        <h1>Game of Life API</h1>
+        <p class="tagline">Draw a board, upload it, then run each operation</p>
+      </div>
+    </div>
+    <button type="button" class="health" id="health" data-state="pending" title="Check GET /health again">
+      <span class="health-dot" aria-hidden="true"></span>
+      <span id="health-text">Checking API</span>
+    </button>
+  </header>
+
+  <main class="layout">
+    <section class="stage-panel" aria-label="Board">
+      <div class="board-bar">
+        <div class="board-identity">
+          <span class="badge" id="state-badge" data-kind="draft">Draft</span>
+          <code class="board-id" id="board-id">Not uploaded yet</code>
+          <button type="button" class="btn btn-small btn-ghost" id="copy-id" hidden>Copy ID</button>
+        </div>
+        <dl class="board-meta">
+          <div><dt>Size</dt><dd id="meta-size">40 × 28</dd></div>
+          <div><dt>Alive</dt><dd id="meta-alive">0</dd></div>
+          <div id="meta-gen-wrap" hidden><dt>Generation</dt><dd id="meta-gen">0</dd></div>
+          <div id="meta-edge-wrap" hidden><dt>Edges</dt><dd id="meta-edge">dead</dd></div>
+        </dl>
+      </div>
+      <div class="stage" id="stage">
+        <canvas id="board" role="img" aria-label="Game of Life board. Click or drag to toggle cells."></canvas>
+      </div>
+      <div class="board-foot">
+        <span id="draft-note">Click or drag to toggle cells. Dragging paints the opposite of the first cell you touch.</span>
+        <span class="coords" id="coords" aria-hidden="true"></span>
+      </div>
+    </section>
+
+    <aside class="sidebar">
+      <section class="card" aria-labelledby="h-board">
+        <h2 id="h-board">Board</h2>
+        <div class="row size-row">
+          <label class="field">
+            <span>Width</span>
+            <input type="number" id="width" min="1" max="256" step="1" value="40" inputmode="numeric">
+          </label>
+          <span class="times" aria-hidden="true">×</span>
+          <label class="field">
+            <span>Height</span>
+            <input type="number" id="height" min="1" max="256" step="1" value="28" inputmode="numeric">
+          </label>
+          <div class="row-actions">
+            <button type="button" class="btn" id="clear">Clear</button>
+            <button type="button" class="btn" id="random">Random</button>
+          </div>
+        </div>
+        <div class="presets" role="group" aria-label="Place a pattern near the center">
+          <span class="presets-label">Patterns</span>
+          <div class="preset-buttons" id="presets"></div>
+        </div>
+        <div class="msg" id="board-msg" role="status" aria-live="polite" hidden></div>
+      </section>
+
+      <section class="card" aria-labelledby="h-upload">
+        <h2 id="h-upload">Upload</h2>
+        <p class="hint">Sends the drawn board to <code>POST /boards</code>. Identical boards always get the same ID.</p>
+        <button type="button" class="btn btn-primary btn-block" id="upload">Upload board</button>
+        <div class="msg" id="upload-msg" role="status" aria-live="polite" hidden></div>
+      </section>
+
+      <section class="card" aria-labelledby="h-ops">
+        <h2 id="h-ops">Operations</h2>
+        <p class="hint" id="ops-hint">Upload the board to run operations on it.</p>
+        <div class="op-grid">
+          <button type="button" class="btn" id="next" disabled>Next generation</button>
+          <button type="button" class="btn" id="final" disabled>Find final state</button>
+        </div>
+        <form class="jump" id="jump-form" novalidate>
+          <label class="field field-grow">
+            <span>Generations</span>
+            <input type="text" id="jump-n" value="100" inputmode="numeric" autocomplete="off" spellcheck="false" aria-describedby="ops-hint">
+          </label>
+          <button type="submit" class="btn" id="jump" disabled>Jump ahead</button>
+        </form>
+        <div class="play">
+          <button type="button" class="btn btn-play" id="play" disabled aria-pressed="false">
+            <svg class="icon icon-play" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9-5.5z"/></svg>
+            <svg class="icon icon-pause" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5h3v11H4zM9 2.5h3v11H9z"/></svg>
+            <span id="play-label">Play</span>
+          </button>
+          <label class="field field-grow speed">
+            <span>Speed <output id="speed-out" class="num">4 per second</output></span>
+            <input type="range" id="speed" min="0" max="5" step="1" value="2">
+          </label>
+        </div>
+        <div class="msg" id="ops-msg" role="status" aria-live="polite" hidden></div>
+      </section>
+
+      <section class="card" id="final-card" aria-labelledby="h-final" hidden>
+        <h2 id="h-final">Final state</h2>
+        <div class="final-body">
+          <div class="final-preview">
+            <canvas id="final-canvas" class="final-canvas" role="img" aria-label="Final board"></canvas>
+          </div>
+          <div class="final-text">
+            <p class="final-kind" id="final-kind"></p>
+            <p class="final-summary" id="final-summary"></p>
+            <dl class="final-stats">
+              <div><dt>Steps</dt><dd id="final-steps" class="num"></dd></div>
+              <div><dt>Period</dt><dd id="final-period" class="num"></dd></div>
+            </dl>
+            <p class="final-from">From board <code id="final-from"></code></p>
+          </div>
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="h-history">
+        <div class="card-head">
+          <h2 id="h-history">History</h2>
+          <button type="button" class="btn btn-small btn-ghost" id="history-clear" disabled>Clear</button>
+        </div>
+        <p class="hint">Click a board to load it again with <code>GET /boards/{id}</code>. A board seen before is marked as a repeat, which is how cycles show up.</p>
+        <ol class="history" id="history" aria-live="off"></ol>
+        <p class="empty" id="history-empty">No boards yet.</p>
+        <div class="msg" id="history-msg" role="status" aria-live="polite" hidden></div>
+      </section>
+    </aside>
+  </main>
+
+  <details class="api-log" id="api-log" open>
+    <summary>
+      <span class="summary-title">API log</span>
+      <span class="summary-count num" id="log-count">0 requests</span>
+    </summary>
+    <div class="log-scroll">
+      <table class="log-table">
+        <thead>
+          <tr><th scope="col">Time</th><th scope="col">Method</th><th scope="col">Path</th><th scope="col" class="r">Status</th><th scope="col" class="r">ms</th></tr>
+        </thead>
+        <tbody id="log-body"></tbody>
+      </table>
+      <p class="empty" id="log-empty">No requests yet.</p>
+    </div>
+  </details>
+</body>
+</html>

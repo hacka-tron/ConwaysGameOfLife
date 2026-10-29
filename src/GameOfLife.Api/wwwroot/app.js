@@ -1,0 +1,1115 @@
+// Browser client for the Game of Life REST API. No build step and no dependencies.
+// All server data is written with textContent, never innerHTML.
+
+const MAX_SIDE = 256;
+const LOG_LIMIT = 50;
+const HISTORY_LIMIT = 300;
+const MAX_CELL_PX = 40;
+const GRID_MIN_CELL_PX = 6;
+const RANDOM_DENSITY = 0.3;
+// Keep in sync with the 900px breakpoint in styles.css.
+const WIDE_QUERY = window.matchMedia('(min-width: 900px)');
+const DARK_QUERY = window.matchMedia('(prefers-color-scheme: dark)');
+
+const SPEEDS = [
+  { delay: 1000, label: '1 per second' },
+  { delay: 500, label: '2 per second' },
+  { delay: 250, label: '4 per second' },
+  { delay: 100, label: '10 per second' },
+  { delay: 50, label: '20 per second' },
+  { delay: 0, label: 'As fast as possible' },
+];
+
+// Patterns use O for a live cell and . for a dead one.
+const PRESETS = [
+  { key: 'glider', name: 'Glider', rows: ['.O.', '..O', 'OOO'] },
+  { key: 'blinker', name: 'Blinker', rows: ['OOO'] },
+  { key: 'block', name: 'Block', rows: ['OO', 'OO'] },
+  { key: 'r-pentomino', name: 'R-pentomino', rows: ['.OO', 'OO.', '.O.'] },
+  {
+    key: 'pulsar',
+    name: 'Pulsar',
+    rows: [
+      '..OOO...OOO..',
+      '.............',
+      'O....O.O....O',
+      'O....O.O....O',
+      'O....O.O....O',
+      '..OOO...OOO..',
+      '.............',
+      '..OOO...OOO..',
+      'O....O.O....O',
+      'O....O.O....O',
+      'O....O.O....O',
+      '.............',
+      '..OOO...OOO..',
+    ],
+  },
+  {
+    key: 'glider-gun',
+    name: 'Glider gun',
+    rows: [
+      '........................O...........',
+      '......................O.O...........',
+      '............OO......OO............OO',
+      '...........O...O....OO............OO',
+      'OO........O.....O...OO..............',
+      'OO........O...O.OO....O.O...........',
+      '..........O.....O.......O...........',
+      '...........O...O....................',
+      '............OO......................',
+    ],
+  },
+];
+
+const FALLBACK_PROBLEMS = {
+  400: { title: 'Request rejected', detail: 'The server did not accept this request.' },
+  404: { title: 'Not found', detail: 'The server has no board with this ID.' },
+  413: { title: 'Board too large', detail: 'The request body is larger than the server accepts.' },
+  422: { title: 'Board did not settle', detail: 'The board did not reach a still life or a repeating cycle within the server step limit.' },
+  500: { title: 'Server error', detail: 'The server failed while handling the request.' },
+  507: { title: 'Storage is full', detail: 'The server has no room left to store boards.' },
+};
+
+const $ = (id) => document.getElementById(id);
+
+const el = {
+  health: $('health'),
+  healthText: $('health-text'),
+  stateBadge: $('state-badge'),
+  boardId: $('board-id'),
+  copyId: $('copy-id'),
+  metaSize: $('meta-size'),
+  metaAlive: $('meta-alive'),
+  metaGenWrap: $('meta-gen-wrap'),
+  metaGen: $('meta-gen'),
+  metaEdgeWrap: $('meta-edge-wrap'),
+  metaEdge: $('meta-edge'),
+  stage: $('stage'),
+  canvas: $('board'),
+  boardFoot: document.querySelector('.board-foot'),
+  draftNote: $('draft-note'),
+  coords: $('coords'),
+  width: $('width'),
+  height: $('height'),
+  clear: $('clear'),
+  random: $('random'),
+  presets: $('presets'),
+  boardMsg: $('board-msg'),
+  upload: $('upload'),
+  uploadMsg: $('upload-msg'),
+  opsHint: $('ops-hint'),
+  next: $('next'),
+  final: $('final'),
+  jumpForm: $('jump-form'),
+  jumpN: $('jump-n'),
+  jump: $('jump'),
+  play: $('play'),
+  playLabel: $('play-label'),
+  speed: $('speed'),
+  speedOut: $('speed-out'),
+  opsMsg: $('ops-msg'),
+  finalCard: $('final-card'),
+  finalCanvas: $('final-canvas'),
+  finalKind: $('final-kind'),
+  finalSummary: $('final-summary'),
+  finalSteps: $('final-steps'),
+  finalPeriod: $('final-period'),
+  finalFrom: $('final-from'),
+  history: $('history'),
+  historyEmpty: $('history-empty'),
+  historyClear: $('history-clear'),
+  historyMsg: $('history-msg'),
+  logCount: $('log-count'),
+  logBody: $('log-body'),
+  logEmpty: $('log-empty'),
+};
+
+const state = {
+  width: 40,
+  height: 28,
+  cells: new Uint8Array(40 * 28),
+  // The board last returned by the server. Null until the first upload.
+  // gen is a BigInt counting generations since the last upload, or null when unknown.
+  stored: null,
+  edited: false,
+  busy: false,
+  playing: false,
+  playTimer: 0,
+  history: [],
+  seq: 0,
+  lastSeen: new Map(),
+  currentSeq: null,
+  logTotal: 0,
+};
+
+// ---------------------------------------------------------------- API
+
+async function api(method, path, body) {
+  const started = performance.now();
+  const headers = { Accept: 'application/json, application/problem+json, text/plain' };
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+
+  let response;
+  let text = '';
+  try {
+    response = await fetch(path, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      cache: 'no-store',
+    });
+    text = await response.text();
+  } catch {
+    logRequest(method, path, 0, performance.now() - started);
+    return {
+      ok: false,
+      status: 0,
+      problem: {
+        status: 0,
+        title: 'Could not reach the API',
+        detail: 'The request failed before the server answered. Check that the API is running.',
+        errors: null,
+      },
+    };
+  }
+
+  logRequest(method, path, response.status, performance.now() - started);
+
+  let data = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = null;
+    }
+  }
+
+  if (response.ok) return { ok: true, status: response.status, data, text };
+  return { ok: false, status: response.status, problem: toProblem(response, data) };
+}
+
+function toProblem(response, data) {
+  const fallback = FALLBACK_PROBLEMS[response.status] ?? {
+    title: `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`,
+    detail: 'The server returned an unexpected error.',
+  };
+  const body = data && typeof data === 'object' && !Array.isArray(data) ? data : {};
+  const messages = [];
+  if (body.errors && typeof body.errors === 'object') {
+    for (const value of Object.values(body.errors)) {
+      for (const message of Array.isArray(value) ? value : [value]) {
+        if (typeof message === 'string' && message.trim()) messages.push(message);
+      }
+    }
+  }
+  const title = typeof body.title === 'string' && body.title.trim() ? body.title : fallback.title;
+  let detail = typeof body.detail === 'string' && body.detail.trim() ? body.detail : '';
+  if (!detail && messages.length === 0) detail = fallback.detail;
+  return { status: response.status, title, detail, errors: messages.length ? messages : null };
+}
+
+function badResponse(status) {
+  return {
+    status,
+    title: 'Unexpected response',
+    detail: 'The server answered, but the body was not the board the API contract describes.',
+    errors: null,
+  };
+}
+
+function isBoardResponse(data) {
+  return (
+    data &&
+    typeof data.id === 'string' &&
+    Number.isInteger(data.width) &&
+    Number.isInteger(data.height) &&
+    data.width > 0 &&
+    data.height > 0 &&
+    Array.isArray(data.cells) &&
+    data.cells.length === data.height &&
+    data.cells.every((row) => Array.isArray(row) && row.length === data.width)
+  );
+}
+
+// ---------------------------------------------------------------- Board model
+
+function index(x, y) {
+  return y * state.width + x;
+}
+
+function population(cells) {
+  let count = 0;
+  for (let i = 0; i < cells.length; i++) count += cells[i];
+  return count;
+}
+
+function toRows() {
+  const rows = [];
+  for (let y = 0; y < state.height; y++) {
+    rows.push(Array.from(state.cells.subarray(y * state.width, (y + 1) * state.width)));
+  }
+  return rows;
+}
+
+function fromRows(rows, width, height) {
+  const cells = new Uint8Array(width * height);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) cells[y * width + x] = rows[y][x] ? 1 : 0;
+  }
+  return cells;
+}
+
+function sameCells(a, b) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+function resize(width, height) {
+  if (width === state.width && height === state.height) return;
+  const next = new Uint8Array(width * height);
+  const w = Math.min(width, state.width);
+  const h = Math.min(height, state.height);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) next[y * width + x] = state.cells[y * state.width + x];
+  }
+  state.width = width;
+  state.height = height;
+  state.cells = next;
+  syncSizeInputs();
+}
+
+// Called after any local change to the drawn cells.
+function boardEdited() {
+  const s = state.stored;
+  state.edited = !s || s.width !== state.width || s.height !== state.height || !sameCells(s.cells, state.cells);
+  scheduleDraw();
+  updateUI();
+}
+
+function setCurrent(board, { via, gen, seq }) {
+  state.width = board.width;
+  state.height = board.height;
+  state.cells = fromRows(board.cells, board.width, board.height);
+  state.stored = {
+    id: board.id,
+    edgeMode: board.edgeMode,
+    width: board.width,
+    height: board.height,
+    cells: state.cells.slice(),
+    gen,
+  };
+  state.edited = false;
+  syncSizeInputs();
+  if (via) {
+    addHistory(board.id, via, gen);
+  } else {
+    setCurrentHistory(seq ?? null);
+  }
+  layoutCanvas();
+  updateUI();
+}
+
+// ---------------------------------------------------------------- Drawing
+
+const ctx = el.canvas.getContext('2d');
+let colors = readColors();
+let view = { cell: 10 };
+let drawQueued = false;
+// The last final board, kept so a theme change can repaint its thumbnail.
+let finalBoard = null;
+
+function readColors() {
+  const css = getComputedStyle(document.documentElement);
+  const read = (name, fallback) => css.getPropertyValue(name).trim() || fallback;
+  return {
+    alive: read('--cell-alive', '#2557d6'),
+    dead: read('--cell-dead', '#ffffff'),
+    grid: read('--cell-grid', '#e3e6eb'),
+  };
+}
+
+function availableSize() {
+  const styles = getComputedStyle(el.stage);
+  const padX = parseFloat(styles.paddingLeft) + parseFloat(styles.paddingRight);
+  const padY = parseFloat(styles.paddingTop) + parseFloat(styles.paddingBottom);
+  const width = Math.max(40, el.stage.clientWidth - padX);
+  const height = WIDE_QUERY.matches
+    ? Math.max(40, el.stage.clientHeight - padY)
+    : Math.max(160, Math.round(window.innerHeight * 0.62));
+  return { width, height };
+}
+
+function layoutCanvas() {
+  const avail = availableSize();
+  const fit = Math.min(avail.width / state.width, avail.height / state.height);
+  // Whole pixels keep cells even. Below 2px per cell, fractional sizes let 256 columns fit a phone.
+  view.cell = fit >= 2 ? Math.min(MAX_CELL_PX, Math.floor(fit)) : Math.max(fit, 0.25);
+  draw();
+}
+
+function paint(canvas, width, height, cells, cell, withGrid) {
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = width * cell;
+  const cssH = height * cell;
+  const pxW = Math.max(1, Math.round(cssW * dpr));
+  const pxH = Math.max(1, Math.round(cssH * dpr));
+  if (canvas.width !== pxW) canvas.width = pxW;
+  if (canvas.height !== pxH) canvas.height = pxH;
+  canvas.style.width = `${pxW / dpr}px`;
+  canvas.style.height = `${pxH / dpr}px`;
+
+  const g = canvas.getContext('2d');
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.fillStyle = colors.dead;
+  g.fillRect(0, 0, pxW, pxH);
+
+  // Cell edges are rounded to device pixels so neighbors never overlap or leave gaps.
+  const xs = new Array(width + 1);
+  const ys = new Array(height + 1);
+  for (let x = 0; x <= width; x++) xs[x] = Math.round((x * pxW) / width);
+  for (let y = 0; y <= height; y++) ys[y] = Math.round((y * pxH) / height);
+
+  g.fillStyle = colors.alive;
+  for (let y = 0; y < height; y++) {
+    const row = y * width;
+    for (let x = 0; x < width; x++) {
+      if (cells[row + x]) g.fillRect(xs[x], ys[y], xs[x + 1] - xs[x], ys[y + 1] - ys[y]);
+    }
+  }
+
+  if (withGrid && cell >= GRID_MIN_CELL_PX) {
+    g.fillStyle = colors.grid;
+    const line = Math.max(1, Math.round(dpr));
+    for (let x = 1; x < width; x++) g.fillRect(xs[x], 0, line, pxH);
+    for (let y = 1; y < height; y++) g.fillRect(0, ys[y], pxW, line);
+  }
+}
+
+function draw() {
+  drawQueued = false;
+  paint(el.canvas, state.width, state.height, state.cells, view.cell, true);
+}
+
+function scheduleDraw() {
+  if (drawQueued) return;
+  drawQueued = true;
+  requestAnimationFrame(draw);
+}
+
+// ---------------------------------------------------------------- Editing
+
+let drag = null;
+
+function cellFromEvent(event, clamp) {
+  const rect = el.canvas.getBoundingClientRect();
+  let x = Math.floor(((event.clientX - rect.left) / rect.width) * state.width);
+  let y = Math.floor(((event.clientY - rect.top) / rect.height) * state.height);
+  if (clamp) {
+    x = Math.min(state.width - 1, Math.max(0, x));
+    y = Math.min(state.height - 1, Math.max(0, y));
+  } else if (x < 0 || y < 0 || x >= state.width || y >= state.height) {
+    return null;
+  }
+  return { x, y };
+}
+
+// Fills every cell on the line between two points so fast drags leave no gaps.
+function paintLine(x0, y0, x1, y1, value) {
+  const dx = Math.abs(x1 - x0);
+  const dy = -Math.abs(y1 - y0);
+  const sx = x0 < x1 ? 1 : -1;
+  const sy = y0 < y1 ? 1 : -1;
+  let err = dx + dy;
+  for (;;) {
+    state.cells[index(x0, y0)] = value;
+    if (x0 === x1 && y0 === y1) return;
+    const e2 = 2 * err;
+    if (e2 >= dy) {
+      err += dy;
+      x0 += sx;
+    }
+    if (e2 <= dx) {
+      err += dx;
+      y0 += sy;
+    }
+  }
+}
+
+function editingLocked() {
+  return state.busy && !state.playing;
+}
+
+el.canvas.addEventListener('pointerdown', (event) => {
+  if (event.button !== 0 || editingLocked()) return;
+  const cell = cellFromEvent(event, false);
+  if (!cell) return;
+  event.preventDefault();
+  if (state.playing) stopPlay('Playback paused because the board was edited.');
+  el.canvas.setPointerCapture(event.pointerId);
+  const value = state.cells[index(cell.x, cell.y)] ? 0 : 1;
+  drag = { pointerId: event.pointerId, value, x: cell.x, y: cell.y };
+  state.cells[index(cell.x, cell.y)] = value;
+  boardEdited();
+});
+
+el.canvas.addEventListener('pointermove', (event) => {
+  const hover = cellFromEvent(event, false);
+  el.coords.textContent = hover ? `x ${hover.x}  y ${hover.y}` : '';
+  if (!drag || event.pointerId !== drag.pointerId) return;
+  if (event.pointerType === 'mouse' && (event.buttons & 1) === 0) {
+    // The button was released somewhere the canvas never heard about.
+    drag = null;
+    return;
+  }
+  const cell = cellFromEvent(event, true);
+  if (cell.x === drag.x && cell.y === drag.y) return;
+  paintLine(drag.x, drag.y, cell.x, cell.y, drag.value);
+  drag.x = cell.x;
+  drag.y = cell.y;
+  boardEdited();
+});
+
+function endDrag(event) {
+  if (drag && event.pointerId === drag.pointerId) drag = null;
+}
+
+el.canvas.addEventListener('pointerup', endDrag);
+el.canvas.addEventListener('pointercancel', endDrag);
+el.canvas.addEventListener('lostpointercapture', endDrag);
+el.canvas.addEventListener('pointerleave', () => {
+  el.coords.textContent = '';
+});
+
+function readSide(input) {
+  const value = Number.parseInt(input.value, 10);
+  if (!Number.isFinite(value)) return null;
+  return Math.min(MAX_SIDE, Math.max(1, value));
+}
+
+function syncSizeInputs() {
+  if (document.activeElement !== el.width) el.width.value = String(state.width);
+  if (document.activeElement !== el.height) el.height.value = String(state.height);
+}
+
+function applySizeInputs() {
+  const width = readSide(el.width);
+  const height = readSide(el.height);
+  if (width === null || height === null) return;
+  if (width === state.width && height === state.height) return;
+  if (state.playing) stopPlay('Playback paused because the board was resized.');
+  resize(width, height);
+  layoutCanvas();
+  boardEdited();
+}
+
+for (const input of [el.width, el.height]) {
+  // Applied on change, not on every keystroke, so typing 40 over 32 never passes through 4 and drops cells.
+  input.addEventListener('change', () => {
+    if (!editingLocked()) applySizeInputs();
+    // Snap whatever was typed to the 1 to 256 range the inputs allow.
+    input.value = String(input === el.width ? state.width : state.height);
+  });
+}
+
+function localEdit(action) {
+  if (editingLocked()) return;
+  if (state.playing) stopPlay('Playback paused because the board was edited.');
+  hideMsg(el.boardMsg);
+  action();
+  boardEdited();
+}
+
+el.clear.addEventListener('click', () => localEdit(() => state.cells.fill(0)));
+
+el.random.addEventListener('click', () =>
+  localEdit(() => {
+    for (let i = 0; i < state.cells.length; i++) state.cells[i] = Math.random() < RANDOM_DENSITY ? 1 : 0;
+  }),
+);
+
+for (const preset of PRESETS) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'btn btn-chip';
+  button.textContent = preset.name;
+  button.addEventListener('click', () => placePreset(preset));
+  el.presets.append(button);
+}
+
+function placePreset(preset) {
+  localEdit(() => {
+    const pw = preset.rows[0].length;
+    const ph = preset.rows.length;
+    if (pw > state.width || ph > state.height) {
+      resize(Math.max(pw, state.width), Math.max(ph, state.height));
+      layoutCanvas();
+      showInfo(el.boardMsg, `The board grew to ${state.width} by ${state.height} so the ${preset.name.toLowerCase()} fits.`);
+    }
+    const ox = Math.floor((state.width - pw) / 2);
+    const oy = Math.floor((state.height - ph) / 2);
+    for (let y = 0; y < ph; y++) {
+      for (let x = 0; x < pw; x++) {
+        if (preset.rows[y][x] === 'O') state.cells[index(ox + x, oy + y)] = 1;
+      }
+    }
+  });
+}
+
+// ---------------------------------------------------------------- Messages
+
+function hideMsg(target) {
+  target.hidden = true;
+  target.replaceChildren();
+  delete target.dataset.kind;
+}
+
+function showInfo(target, text, kind = 'info') {
+  const p = document.createElement('p');
+  p.textContent = text;
+  target.replaceChildren(p);
+  target.dataset.kind = kind;
+  target.hidden = false;
+}
+
+function showProblem(target, problem) {
+  const head = document.createElement('div');
+  head.className = 'msg-title';
+  const title = document.createElement('span');
+  title.textContent = problem.title;
+  head.append(title);
+  if (problem.status) {
+    const status = document.createElement('span');
+    status.className = 'msg-status';
+    status.textContent = `HTTP ${problem.status}`;
+    head.append(status);
+  }
+  const parts = [head];
+  if (problem.detail) {
+    const p = document.createElement('p');
+    p.textContent = problem.detail;
+    parts.push(p);
+  }
+  if (problem.errors) {
+    const list = document.createElement('ul');
+    for (const message of problem.errors) {
+      const item = document.createElement('li');
+      item.textContent = message;
+      list.append(item);
+    }
+    parts.push(list);
+  }
+  target.replaceChildren(...parts);
+  target.dataset.kind = 'error';
+  target.hidden = false;
+}
+
+// ---------------------------------------------------------------- Formatting
+
+function shortId(id) {
+  return id.length > 12 ? `${id.slice(0, 8)}…${id.slice(-4)}` : id;
+}
+
+function formatBig(value) {
+  return BigInt(value).toLocaleString('en-US');
+}
+
+function plural(count, one, many) {
+  return `${formatBig(count)} ${BigInt(count) === 1n ? one : many}`;
+}
+
+function shortenPath(path) {
+  return path.replace(/[0-9a-f]{64}/gi, (id) => shortId(id));
+}
+
+// ---------------------------------------------------------------- UI state
+
+function canOperate() {
+  return Boolean(state.stored) && !state.edited;
+}
+
+function updateUI() {
+  const s = state.stored;
+  const operable = canOperate();
+
+  if (!s) {
+    el.stateBadge.dataset.kind = 'draft';
+    el.stateBadge.textContent = 'Draft';
+    el.boardId.textContent = 'Not uploaded yet';
+    el.boardId.title = '';
+    el.boardId.classList.remove('is-stored');
+  } else if (state.edited) {
+    el.stateBadge.dataset.kind = 'edited';
+    el.stateBadge.textContent = 'Unsaved draft';
+    el.boardId.textContent = `Edited from ${shortId(s.id)}`;
+    el.boardId.title = s.id;
+    el.boardId.classList.remove('is-stored');
+  } else {
+    el.stateBadge.dataset.kind = 'stored';
+    el.stateBadge.textContent = 'Stored';
+    el.boardId.textContent = shortId(s.id);
+    el.boardId.title = s.id;
+    el.boardId.classList.add('is-stored');
+  }
+  el.copyId.hidden = !operable;
+
+  el.metaSize.textContent = `${state.width} × ${state.height}`;
+  el.metaAlive.textContent = population(state.cells).toLocaleString('en-US');
+  el.metaGenWrap.hidden = !operable || s.gen === null;
+  if (operable && s.gen !== null) el.metaGen.textContent = formatBig(s.gen);
+  el.metaEdgeWrap.hidden = !operable;
+  if (operable) el.metaEdge.textContent = s.edgeMode === 'wrap' ? 'wrap around' : String(s.edgeMode || 'dead');
+
+  el.boardFoot.classList.toggle('is-edited', state.edited && Boolean(s));
+  el.draftNote.textContent =
+    state.edited && s
+      ? 'This board has changed since it was stored. Upload it again to run operations on it.'
+      : 'Click or drag to toggle cells. Dragging paints the opposite of the first cell you touch.';
+
+  el.opsHint.textContent = !s
+    ? 'Upload the board to run operations on it.'
+    : state.edited
+      ? 'The drawn board is an unsaved draft. Upload it to run operations on it.'
+      : 'Each result becomes the current board and is added to the history.';
+
+  const idle = !state.busy;
+  el.upload.disabled = state.busy && !state.playing;
+  el.upload.textContent = s && !state.edited ? 'Upload board again' : 'Upload board';
+  el.next.disabled = !operable || !idle;
+  el.final.disabled = !operable || !idle;
+  el.jump.disabled = !operable || !idle;
+  el.play.disabled = !operable || (!idle && !state.playing);
+  el.play.setAttribute('aria-pressed', String(state.playing));
+  el.playLabel.textContent = state.playing ? 'Pause' : 'Play';
+
+  const locked = editingLocked();
+  for (const control of [el.clear, el.random, el.width, el.height, ...el.presets.children]) {
+    control.disabled = locked;
+  }
+  el.canvas.classList.toggle('is-locked', locked);
+
+  el.historyClear.disabled = state.history.length === 0;
+  el.historyEmpty.hidden = state.history.length > 0;
+}
+
+// Runs one request-driven action with the controls locked and a spinner on its button.
+async function runBusy(button, action) {
+  if (state.busy) return;
+  state.busy = true;
+  button?.classList.add('is-busy');
+  updateUI();
+  try {
+    await action();
+  } finally {
+    state.busy = false;
+    button?.classList.remove('is-busy');
+    updateUI();
+  }
+}
+
+// ---------------------------------------------------------------- Operations
+
+function upload() {
+  if (state.playing) stopPlay();
+  hideMsg(el.uploadMsg);
+  hideMsg(el.opsMsg);
+  return runBusy(el.upload, async () => {
+    const result = await api('POST', '/boards', { cells: toRows() });
+    if (!result.ok) return showProblem(el.uploadMsg, result.problem);
+    if (!isBoardResponse(result.data)) return showProblem(el.uploadMsg, badResponse(result.status));
+    setCurrent(result.data, { via: 'upload', gen: 0n });
+    const id = shortId(result.data.id);
+    if (result.status === 201) {
+      showInfo(el.uploadMsg, `Stored as a new board with ID ${id}. The server answered 201 Created.`, 'success');
+    } else {
+      showInfo(
+        el.uploadMsg,
+        `This exact board was already stored, so the server returned its existing ID ${id} with 200 OK.`,
+        'success',
+      );
+    }
+  });
+}
+
+async function fetchNext() {
+  const s = state.stored;
+  const result = await api('GET', `/boards/${encodeURIComponent(s.id)}/next`);
+  if (result.ok && !isBoardResponse(result.data)) return { ok: false, problem: badResponse(result.status) };
+  return result;
+}
+
+function nextGeneration() {
+  hideMsg(el.opsMsg);
+  return runBusy(el.next, async () => {
+    const s = state.stored;
+    const result = await fetchNext();
+    if (!result.ok) return showProblem(el.opsMsg, result.problem);
+    setCurrent(result.data, { via: 'next', gen: s.gen === null ? null : s.gen + 1n });
+    if (result.data.id === s.id) {
+      showInfo(el.opsMsg, 'The next generation is identical, so this board is a still life.');
+    }
+  });
+}
+
+function jumpAhead() {
+  hideMsg(el.opsMsg);
+  const raw = el.jumpN.value.trim().replace(/[,_\s]/g, '');
+  if (!/^\d+$/.test(raw)) {
+    el.jumpN.setAttribute('aria-invalid', 'true');
+    showProblem(el.opsMsg, {
+      status: 0,
+      title: 'Not a valid number',
+      detail: 'Enter a whole number of generations, zero or more.',
+      errors: null,
+    });
+    return;
+  }
+  el.jumpN.removeAttribute('aria-invalid');
+  const n = BigInt(raw);
+  return runBusy(el.jump, async () => {
+    const s = state.stored;
+    const result = await api('GET', `/boards/${encodeURIComponent(s.id)}/generations/${n.toString()}`);
+    if (!result.ok) return showProblem(el.opsMsg, result.problem);
+    if (!isBoardResponse(result.data)) return showProblem(el.opsMsg, badResponse(result.status));
+    setCurrent(result.data, { via: `+${formatBig(n)}`, gen: s.gen === null ? null : s.gen + n });
+  });
+}
+
+function findFinal() {
+  hideMsg(el.opsMsg);
+  return runBusy(el.final, async () => {
+    const s = state.stored;
+    const result = await api('GET', `/boards/${encodeURIComponent(s.id)}/final`);
+    if (!result.ok) return showProblem(el.opsMsg, result.problem);
+    const data = result.data;
+    if (
+      !data ||
+      !isBoardResponse(data.board) ||
+      !Number.isInteger(data.steps) ||
+      !Number.isInteger(data.period) ||
+      data.steps < 0 ||
+      data.period < 1
+    ) {
+      return showProblem(el.opsMsg, badResponse(result.status));
+    }
+    setCurrent(data.board, { via: 'final', gen: s.gen === null ? null : s.gen + BigInt(data.steps) });
+    showFinal(data, s.id);
+  });
+}
+
+// Fits the final board thumbnail into roughly 300 by 180 pixels.
+function finalCellSize(board) {
+  const fit = Math.min(300 / board.width, 180 / board.height);
+  return fit >= 2 ? Math.min(12, Math.floor(fit)) : Math.max(0.5, fit);
+}
+
+function showFinal(data, fromId) {
+  const oscillator = data.kind === 'oscillator' || (data.kind !== 'still-life' && data.period > 1);
+  const steps = BigInt(data.steps);
+  el.finalKind.textContent = oscillator ? `Oscillator with period ${data.period}` : 'Still life';
+
+  let summary;
+  if (oscillator) {
+    summary =
+      steps === 0n
+        ? `The board is already in a cycle that repeats every ${plural(data.period, 'generation', 'generations')}.`
+        : `The board enters a cycle after ${plural(steps, 'generation', 'generations')} and then repeats every ${plural(data.period, 'generation', 'generations')}.`;
+    summary += ' The board shown is the cycle member with the smallest ID.';
+  } else {
+    summary =
+      steps === 0n
+        ? 'The board is already settled and never changes.'
+        : `The board stops changing after ${plural(steps, 'generation', 'generations')}.`;
+  }
+  el.finalSummary.textContent = summary;
+  el.finalSteps.textContent = formatBig(steps);
+  el.finalPeriod.textContent = formatBig(data.period);
+  el.finalFrom.textContent = shortId(fromId);
+  el.finalFrom.title = fromId;
+
+  const b = data.board;
+  const cell = finalCellSize(b);
+  paint(el.finalCanvas, b.width, b.height, fromRows(b.cells, b.width, b.height), cell, false);
+  el.finalCanvas.setAttribute('aria-label', `Final board, ${b.width} by ${b.height}`);
+  el.finalCard.hidden = false;
+  finalBoard = b;
+}
+
+// ---------------------------------------------------------------- Play
+
+function currentDelay() {
+  return SPEEDS[Number(el.speed.value)]?.delay ?? 250;
+}
+
+function startPlay() {
+  if (!canOperate() || state.busy) return;
+  hideMsg(el.opsMsg);
+  state.playing = true;
+  state.busy = true;
+  updateUI();
+  playStep();
+}
+
+function stopPlay(message) {
+  if (!state.playing) return;
+  state.playing = false;
+  state.busy = false;
+  clearTimeout(state.playTimer);
+  state.playTimer = 0;
+  if (message) showInfo(el.opsMsg, message);
+  updateUI();
+}
+
+async function playStep() {
+  if (!state.playing) return;
+  const s = state.stored;
+  const result = await fetchNext();
+  // Paused, edited or replaced while the request was in flight. Drop the result.
+  if (!state.playing || state.stored !== s) return;
+  if (!result.ok) {
+    stopPlay();
+    showProblem(el.opsMsg, result.problem);
+    return;
+  }
+  if (result.data.id === s.id) {
+    stopPlay('The next generation has the same ID as this one, so the board is a still life. Playback stopped.');
+    return;
+  }
+  setCurrent(result.data, { via: 'next', gen: s.gen === null ? null : s.gen + 1n });
+  state.playTimer = setTimeout(playStep, currentDelay());
+}
+
+el.play.addEventListener('click', () => {
+  if (state.playing) stopPlay();
+  else startPlay();
+});
+
+function updateSpeedLabel() {
+  el.speedOut.textContent = SPEEDS[Number(el.speed.value)]?.label ?? '';
+}
+
+el.speed.addEventListener('input', updateSpeedLabel);
+
+// ---------------------------------------------------------------- History
+
+const historyItems = new Map();
+
+function addHistory(id, via, gen) {
+  const seq = ++state.seq;
+  const previous = state.lastSeen.get(id) ?? null;
+  state.lastSeen.set(id, seq);
+  const entry = { seq, id, via, gen, repeatOf: previous };
+  state.history.push(entry);
+
+  const li = document.createElement('li');
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'history-item';
+  button.dataset.id = id;
+  button.title = id;
+
+  const seqEl = document.createElement('span');
+  seqEl.className = 'h-seq';
+  seqEl.textContent = `#${seq}`;
+
+  const main = document.createElement('span');
+  main.className = 'h-main';
+  const idEl = document.createElement('span');
+  idEl.className = 'h-id';
+  idEl.textContent = shortId(id);
+  const sub = document.createElement('span');
+  sub.className = 'h-sub';
+  const genText = gen === null ? 'gen unknown' : `gen ${formatBig(gen)}`;
+  if (previous !== null) {
+    const repeat = document.createElement('span');
+    repeat.className = 'h-repeat';
+    repeat.textContent = `Repeat of #${previous}`;
+    sub.append(repeat, ` (${seq - previous} back) · ${genText}`);
+    button.classList.add('is-repeat');
+  } else {
+    sub.textContent = genText.charAt(0).toUpperCase() + genText.slice(1);
+  }
+  main.append(idEl, sub);
+
+  const viaEl = document.createElement('span');
+  viaEl.className = 'h-via';
+  viaEl.textContent = via;
+
+  button.append(seqEl, main, viaEl);
+  button.setAttribute(
+    'aria-label',
+    `Board ${seq}, ${via}, ID ${shortId(id)}${previous !== null ? `, repeat of board ${previous}` : ''}`,
+  );
+  button.addEventListener('click', () => openHistory(entry));
+  button.addEventListener('mouseenter', () => highlightSame(id, true));
+  button.addEventListener('mouseleave', () => highlightSame(id, false));
+  button.addEventListener('focus', () => highlightSame(id, true));
+  button.addEventListener('blur', () => highlightSame(id, false));
+
+  li.append(button);
+  el.history.prepend(li);
+  historyItems.set(seq, button);
+
+  while (state.history.length > HISTORY_LIMIT) {
+    const dropped = state.history.shift();
+    historyItems.get(dropped.seq)?.parentElement?.remove();
+    historyItems.delete(dropped.seq);
+  }
+  setCurrentHistory(seq);
+}
+
+function setCurrentHistory(seq) {
+  if (state.currentSeq !== null) historyItems.get(state.currentSeq)?.classList.remove('is-current');
+  state.currentSeq = seq;
+  const button = seq === null ? null : historyItems.get(seq);
+  if (button) {
+    button.classList.add('is-current');
+    button.setAttribute('aria-current', 'true');
+  }
+  for (const [key, item] of historyItems) {
+    if (key !== seq) item.removeAttribute('aria-current');
+  }
+}
+
+function highlightSame(id, on) {
+  for (const item of el.history.querySelectorAll(`[data-id="${CSS.escape(id)}"]`)) item.classList.toggle('is-same', on);
+}
+
+function openHistory(entry) {
+  if (state.playing) stopPlay();
+  if (state.busy) return;
+  hideMsg(el.historyMsg);
+  return runBusy(historyItems.get(entry.seq), async () => {
+    const result = await api('GET', `/boards/${encodeURIComponent(entry.id)}`);
+    if (!result.ok) return showProblem(el.historyMsg, result.problem);
+    if (!isBoardResponse(result.data)) return showProblem(el.historyMsg, badResponse(result.status));
+    setCurrent(result.data, { via: null, gen: entry.gen, seq: entry.seq });
+    showInfo(el.historyMsg, `Loaded board #${entry.seq} again from the server.`);
+  });
+}
+
+el.historyClear.addEventListener('click', () => {
+  state.history = [];
+  state.lastSeen.clear();
+  historyItems.clear();
+  state.currentSeq = null;
+  el.history.replaceChildren();
+  hideMsg(el.historyMsg);
+  updateUI();
+});
+
+// ---------------------------------------------------------------- API log
+
+function logRequest(method, path, status, ms) {
+  state.logTotal += 1;
+  const row = document.createElement('tr');
+  const now = new Date();
+  const cells = [
+    ['l-time', now.toLocaleTimeString('en-GB', { hour12: false })],
+    ['l-method', method],
+    ['l-path', shortenPath(path)],
+    ['r', ''],
+    ['r', Math.round(ms).toLocaleString('en-US')],
+  ];
+  for (const [cls, text] of cells) {
+    const td = document.createElement('td');
+    td.className = cls;
+    td.textContent = text;
+    row.append(td);
+  }
+  row.children[2].title = path;
+  const pill = document.createElement('span');
+  pill.className = 'status-pill';
+  pill.dataset.range = String(Math.floor(status / 100));
+  pill.textContent = status === 0 ? 'failed' : String(status);
+  row.children[3].append(pill);
+
+  el.logBody.prepend(row);
+  while (el.logBody.children.length > LOG_LIMIT) el.logBody.lastElementChild.remove();
+  el.logEmpty.hidden = true;
+  el.logCount.textContent =
+    state.logTotal > LOG_LIMIT
+      ? `${state.logTotal.toLocaleString('en-US')} requests, last ${LOG_LIMIT} shown`
+      : `${state.logTotal} ${state.logTotal === 1 ? 'request' : 'requests'}`;
+}
+
+// ---------------------------------------------------------------- Health and clipboard
+
+async function checkHealth() {
+  el.health.dataset.state = 'pending';
+  el.healthText.textContent = 'Checking API';
+  const result = await api('GET', '/health');
+  const healthy = result.ok && result.text.trim() === 'Healthy';
+  el.health.dataset.state = healthy ? 'ok' : 'down';
+  el.healthText.textContent = healthy
+    ? 'API healthy'
+    : result.status === 0
+      ? 'API unreachable'
+      : `API unhealthy (${result.status})`;
+}
+
+el.health.addEventListener('click', checkHealth);
+
+el.copyId.addEventListener('click', async () => {
+  const id = state.stored?.id;
+  if (!id) return;
+  let copied = false;
+  try {
+    await navigator.clipboard.writeText(id);
+    copied = true;
+  } catch {
+    // Clipboard access can be refused. Fall back to selecting the full ID so it can be copied by hand.
+    el.boardId.textContent = id;
+    const range = document.createRange();
+    range.selectNodeContents(el.boardId);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+  el.copyId.textContent = copied ? 'Copied' : 'ID selected';
+  setTimeout(() => {
+    el.copyId.textContent = 'Copy ID';
+  }, 1500);
+});
+
+// ---------------------------------------------------------------- Wiring
+
+el.upload.addEventListener('click', upload);
+el.next.addEventListener('click', nextGeneration);
+el.final.addEventListener('click', findFinal);
+el.jumpForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  if (!el.jump.disabled) jumpAhead();
+});
+el.jumpN.addEventListener('input', () => el.jumpN.removeAttribute('aria-invalid'));
+
+function retheme() {
+  colors = readColors();
+  draw();
+  if (finalBoard && !el.finalCard.hidden) {
+    const b = finalBoard;
+    const cell = finalCellSize(b);
+    paint(el.finalCanvas, b.width, b.height, fromRows(b.cells, b.width, b.height), cell, false);
+  }
+}
+
+DARK_QUERY.addEventListener('change', retheme);
+WIDE_QUERY.addEventListener('change', layoutCanvas);
+
+let lastStageSize = '';
+new ResizeObserver(() => {
+  // Only refit when the stage width changes or, on wide screens, its height. Avoids a resize loop on phones.
+  const key = WIDE_QUERY.matches ? `${el.stage.clientWidth}x${el.stage.clientHeight}` : `${el.stage.clientWidth}`;
+  if (key === lastStageSize) return;
+  lastStageSize = key;
+  layoutCanvas();
+}).observe(el.stage);
+window.addEventListener('resize', layoutCanvas);
+
+updateSpeedLabel();
+placePreset(PRESETS.find((p) => p.key === 'glider'));
+hideMsg(el.boardMsg);
+layoutCanvas();
+updateUI();
+checkHealth();

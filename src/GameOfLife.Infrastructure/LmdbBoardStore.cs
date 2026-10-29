@@ -1,0 +1,191 @@
+using System.Buffers.Binary;
+using System.Text;
+using GameOfLife.Core;
+using GameOfLife.Core.Storage;
+using LightningDB;
+using Microsoft.Extensions.Options;
+
+namespace GameOfLife.Infrastructure;
+
+/// <summary>
+/// Stores boards in LMDB, an embedded key-value store. Every commit is flushed to disk before it
+/// returns, and LMDB never overwrites live pages, so a crash cannot lose or corrupt committed data.
+/// </summary>
+/// <remarks>
+/// Keys and values:
+/// <list type="bullet">
+/// <item><c>board:{id}</c> holds the format version, width, height, edge rule and packed cells.</item>
+/// <item><c>next:{id}</c> holds the ID of the next generation.</item>
+/// <item><c>final:{id}</c> holds steps, period and the ID of the final board.</item>
+/// </list>
+/// Each operation is one short synchronous transaction. LMDB transactions must not span an
+/// <c>await</c>, and these calls take microseconds, so there is nothing to gain from doing so.
+/// </remarks>
+public sealed class LmdbBoardStore : IBoardStore, IDisposable
+{
+    private const byte BoardFormatVersion = 1;
+    private const int BoardHeaderLength = 1 + 4 + 4 + 4;
+
+    private readonly LightningEnvironment _environment;
+    private readonly LightningDatabase _database;
+
+    public LmdbBoardStore(IOptions<StorageOptions> options)
+    {
+        var settings = options.Value;
+        Directory.CreateDirectory(settings.Path);
+        _environment = new LightningEnvironment(settings.Path, new EnvironmentConfiguration { MapSize = settings.MaxSizeBytes });
+
+        // Reader slots belong to transactions rather than threads, because ASP.NET runs requests on a thread pool.
+        // Sync flags are left at their defaults, so every commit is durable.
+        _environment.Open(EnvironmentOpenFlags.NoThreadLocalStorage);
+
+        using var transaction = _environment.BeginTransaction();
+        _database = transaction.OpenDatabase(configuration: new DatabaseConfiguration { Flags = DatabaseOpenFlags.Create });
+        transaction.Commit().ThrowOnError();
+    }
+
+    public Task<BoardRecord?> GetAsync(string id, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        using var transaction = _environment.BeginTransaction(TransactionBeginFlags.ReadOnly);
+        if (!transaction.TryGet(_database, Key("board", id), out byte[]? boardValue))
+        {
+            return Task.FromResult<BoardRecord?>(null);
+        }
+
+        string? nextId = transaction.TryGet(_database, Key("next", id), out byte[]? nextValue)
+            ? Encoding.ASCII.GetString(nextValue!)
+            : null;
+        StoredFinalState? final = transaction.TryGet(_database, Key("final", id), out byte[]? finalValue)
+            ? DecodeFinal(finalValue!)
+            : null;
+
+        return Task.FromResult<BoardRecord?>(new BoardRecord(DecodeBoard(boardValue!), nextId, final));
+    }
+
+    public Task<bool> AddAsync(Board board, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(Write(transaction => PutBoard(transaction, board)));
+    }
+
+    public Task SaveNextAsync(string fromId, Board next, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Write(transaction =>
+        {
+            // The board is written before the link to it, in the same commit.
+            PutBoard(transaction, next);
+            Put(transaction, Key("next", fromId), Encoding.ASCII.GetBytes(next.Id));
+            return true;
+        });
+        return Task.CompletedTask;
+    }
+
+    public Task SaveFinalAsync(string fromId, FinalState final, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Write(transaction =>
+        {
+            PutBoard(transaction, final.Board);
+            Put(transaction, Key("final", final.Board.Id), EncodeFinal(final.Board.Id, 0, final.Period));
+            Put(transaction, Key("final", fromId), EncodeFinal(final.Board.Id, final.Steps, final.Period));
+            return true;
+        });
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Opens and closes a read transaction, to check the store is usable.</summary>
+    public void Ping()
+    {
+        using var transaction = _environment.BeginTransaction(TransactionBeginFlags.ReadOnly);
+    }
+
+    public void Dispose()
+    {
+        _database.Dispose();
+        _environment.Dispose();
+    }
+
+    private T Write<T>(Func<LightningTransaction, T> work)
+    {
+        try
+        {
+            using var transaction = _environment.BeginTransaction();
+            T result = work(transaction);
+            transaction.Commit().ThrowOnError();
+            return result;
+        }
+        catch (LightningException ex) when (ex.StatusCode == (int)MDBResultCode.MapFull)
+        {
+            throw new StorageFullException(ex);
+        }
+    }
+
+    /// <returns><c>true</c> if the board was new.</returns>
+    private bool PutBoard(LightningTransaction transaction, Board board)
+    {
+        byte[] key = Key("board", board.Id);
+        byte[] value = EncodeBoard(board);
+        var result = transaction.Put(_database, key, value, PutOptions.NoOverwrite);
+        if (result == MDBResultCode.KeyExist)
+        {
+            // A SHA-256 collision is practically impossible, but checking is cheap and turns
+            // silent corruption into a loud failure.
+            transaction.TryGet(_database, key, out byte[]? stored);
+            if (!stored.AsSpan().SequenceEqual(value))
+            {
+                throw new InvalidOperationException($"Two different boards hashed to the same ID '{board.Id}'.");
+            }
+
+            return false;
+        }
+
+        result.ThrowOnError();
+        return true;
+    }
+
+    private void Put(LightningTransaction transaction, byte[] key, byte[] value) =>
+        transaction.Put(_database, key, value).ThrowOnError();
+
+    private static byte[] Key(string kind, string id) => Encoding.ASCII.GetBytes($"{kind}:{id}");
+
+    private static byte[] EncodeBoard(Board board)
+    {
+        var value = new byte[BoardHeaderLength + board.PackedCells.Length];
+        value[0] = BoardFormatVersion;
+        BinaryPrimitives.WriteInt32LittleEndian(value.AsSpan(1), board.Width);
+        BinaryPrimitives.WriteInt32LittleEndian(value.AsSpan(5), board.Height);
+        Encoding.ASCII.GetBytes(board.EdgeMode.ToKey(), value.AsSpan(9, 4));
+        board.PackedCells.CopyTo(value.AsSpan(BoardHeaderLength));
+        return value;
+    }
+
+    private static Board DecodeBoard(byte[] value)
+    {
+        if (value[0] != BoardFormatVersion)
+        {
+            throw new InvalidDataException($"Unsupported board format version {value[0]}.");
+        }
+
+        return Board.FromPacked(
+            BinaryPrimitives.ReadInt32LittleEndian(value.AsSpan(1)),
+            BinaryPrimitives.ReadInt32LittleEndian(value.AsSpan(5)),
+            EdgeModeKeys.Parse(Encoding.ASCII.GetString(value, 9, 4)),
+            value.AsSpan(BoardHeaderLength));
+    }
+
+    private static byte[] EncodeFinal(string boardId, int steps, int period)
+    {
+        var value = new byte[8 + boardId.Length];
+        BinaryPrimitives.WriteInt32LittleEndian(value, steps);
+        BinaryPrimitives.WriteInt32LittleEndian(value.AsSpan(4), period);
+        Encoding.ASCII.GetBytes(boardId, value.AsSpan(8));
+        return value;
+    }
+
+    private static StoredFinalState DecodeFinal(byte[] value) => new(
+        Encoding.ASCII.GetString(value, 8, value.Length - 8),
+        BinaryPrimitives.ReadInt32LittleEndian(value),
+        BinaryPrimitives.ReadInt32LittleEndian(value.AsSpan(4)));
+}
