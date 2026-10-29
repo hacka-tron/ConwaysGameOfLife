@@ -42,7 +42,11 @@ if (app.Environment.IsDevelopment())
 
 // The browser UI in wwwroot, served from the same origin as the API.
 app.UseDefaultFiles();
-app.UseStaticFiles();
+app.UseStaticFiles(new StaticFileOptions
+{
+    // The UI is a few small files, so browsers revalidate them on every load and never run a stale copy.
+    OnPrepareResponse = context => context.Context.Response.Headers.CacheControl = "no-cache",
+});
 
 app.MapControllers();
 app.MapHealthChecks("/health");
