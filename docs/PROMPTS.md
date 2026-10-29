@@ -203,3 +203,19 @@ like each board would just be a has, and that hash can be compared?
 ```
 
 Confirmed the approach. The browser hashes the drawn board the same way the server does, so the ID it shows matches the server's and can be compared directly.
+
+### 27
+
+```text
+one more thing, can we make load just auto load a generaed board? also the upload button isn't necessary, we will also have a standalone api if the reviewers want to use that
+```
+
+The Upload button was removed from the browser UI and the ID field now loads a board as soon as a complete ID is pasted or typed.
+
+### 28
+
+```text
+so if we load a board not stored, then I want to generate that board in our db (if its a valid id)
+```
+
+An ID is a one-way hash, so a board cannot be rebuilt from an ID that was never stored. The UI now says so when an ID is not found, and IDs that encode the board itself were offered as an alternative.
