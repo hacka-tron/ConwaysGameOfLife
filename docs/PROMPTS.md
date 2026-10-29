@@ -367,3 +367,11 @@ also when i reach a final state while playing it doesn't show that, when playing
 ```
 
 Play now asks for the final state when it starts and shows the Final state panel once playback reaches that board.
+
+### 46
+
+```text
+even the next generation calls should show final state when we reach it
+```
+
+The final state lookup now covers Next and Jump as well as Play, so the Final state panel appears whenever stepping reaches the settled state.

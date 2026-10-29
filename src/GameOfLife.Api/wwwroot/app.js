@@ -136,10 +136,10 @@ const state = {
   busyTimer: 0,
   playing: false,
   playTimer: 0,
-  // The final state of the board Play started from, fetched when Play starts, and that board's ID.
-  // The Final state panel appears when playback reaches it.
-  playFinal: null,
-  playFromId: null,
+  // The board stepping started from, with its generation and its final state once fetched. Next, Jump
+  // and Play share it until the board is edited or another board is loaded, and the Final state panel
+  // appears once stepping reaches the final state.
+  run: null,
   logTotal: 0,
   // Edge rule of the drawn board, sent with every save. It is part of the board's ID.
   edgeMode: 'dead',
@@ -861,13 +861,14 @@ async function fetchNext() {
 function nextGeneration() {
   hideMsg(el.opsMsg);
   hideMsg(el.loadMsg);
-  hideFinal();
   return runBusy(el.next, async () => {
     const s = await ensureStored(el.opsMsg);
     if (!s) return;
+    startRun();
     const result = await fetchNext();
     if (!result.ok) return showProblem(el.opsMsg, result.problem);
     setCurrent(result.data, { gen: s.gen === null ? null : s.gen + 1n });
+    showFinalIfReached();
     if (result.data.id === s.id) {
       showInfo(el.opsMsg, 'The next generation is identical, so this board is a still life.');
     }
@@ -877,7 +878,6 @@ function nextGeneration() {
 function jumpAhead() {
   hideMsg(el.opsMsg);
   hideMsg(el.loadMsg);
-  hideFinal();
   const raw = el.jumpN.value.trim().replace(/[,_\s]/g, '');
   if (!/^\d+$/.test(raw)) {
     el.jumpN.setAttribute('aria-invalid', 'true');
@@ -894,10 +894,12 @@ function jumpAhead() {
   return runBusy(el.jump, async () => {
     const s = await ensureStored(el.opsMsg);
     if (!s) return;
+    startRun();
     const result = await api('GET', `/boards/${encodeURIComponent(s.id)}/generations/${n.toString()}`);
     if (!result.ok) return showProblem(el.opsMsg, result.problem);
     if (!isBoardResponse(result.data)) return showProblem(el.opsMsg, badResponse(result.status));
     setCurrent(result.data, { gen: s.gen === null ? null : s.gen + n });
+    showFinalIfReached();
   });
 }
 
@@ -924,6 +926,7 @@ function findFinal() {
     const data = result.data;
     if (!isFinalResponse(data)) return showProblem(el.opsMsg, badResponse(result.status));
     setCurrent(data.board, { gen: s.gen === null ? null : s.gen + BigInt(data.steps) });
+    state.run = { fromId: s.id, startGen: s.gen, final: data };
     showFinal(data, s.id);
   });
 }
@@ -938,8 +941,33 @@ function finalCellSize(board) {
 function hideFinal() {
   el.finalCard.hidden = true;
   finalBoard = null;
-  state.playFinal = null;
-  state.playFromId = null;
+  state.run = null;
+}
+
+// Starts a run from the current board if none is going, and asks for its final state alongside the
+// stepping. If the board never settles within the step limit, the panel simply never appears.
+async function startRun() {
+  if (state.run) return;
+  const run = { fromId: state.stored.id, startGen: state.stored.gen, final: null };
+  state.run = run;
+  const result = await api('GET', `/boards/${encodeURIComponent(run.fromId)}/final`);
+  // hideFinal replaces the run when the board changes, which drops answers that no longer apply.
+  if (state.run !== run || !result.ok || !isFinalResponse(result.data)) return;
+  run.final = result.data;
+  // Stepping may already have reached the final state by the time the answer arrives.
+  showFinalIfReached();
+}
+
+// Reached once the current board is the final board, or is at least the final state's number of
+// steps past the start, which means it is inside the final cycle.
+function showFinalIfReached() {
+  const run = state.run;
+  if (!run?.final || !el.finalCard.hidden || !canOperate()) return;
+  const s = state.stored;
+  const reached =
+    s.id === run.final.board.id ||
+    (s.gen !== null && run.startGen !== null && s.gen - run.startGen >= BigInt(run.final.steps));
+  if (reached) showFinal(run.final, run.fromId);
 }
 
 function showFinal(data, fromId) {
@@ -984,7 +1012,6 @@ async function startPlay() {
   if (state.busy) return;
   hideMsg(el.opsMsg);
   hideMsg(el.loadMsg);
-  hideFinal();
   if (!canOperate()) {
     // Save the drawing first. Editing is locked while busy, so the board cannot change during the save.
     await runBusy(el.play, () => ensureStored(el.opsMsg));
@@ -993,27 +1020,8 @@ async function startPlay() {
   state.playing = true;
   state.busy = true;
   updateUI();
-  fetchPlayFinal(state.stored.id);
+  startRun();
   playStep();
-}
-
-// Runs alongside playback. If the board never settles within the step limit, Play simply never shows the panel.
-async function fetchPlayFinal(fromId) {
-  state.playFinal = null;
-  state.playFromId = fromId;
-  const result = await api('GET', `/boards/${encodeURIComponent(fromId)}/final`);
-  // Kept after Play stops, so a slow answer still shows if playback ended on the final board.
-  // hideFinal clears playFromId when the board changes, which drops answers that no longer apply.
-  if (state.playFromId !== fromId || !result.ok || !isFinalResponse(result.data)) return;
-  state.playFinal = result.data;
-  // Playback may already be at or past the final board by the time the answer arrives.
-  showPlayFinalIfReached();
-}
-
-function showPlayFinalIfReached() {
-  if (!state.playFinal || state.stored?.id !== state.playFinal.board.id) return;
-  showFinal(state.playFinal, state.playFromId);
-  state.playFinal = null;
 }
 
 function stopPlay(message) {
@@ -1042,7 +1050,7 @@ async function playStep() {
     return;
   }
   setCurrent(result.data, { gen: s.gen === null ? null : s.gen + 1n });
-  showPlayFinalIfReached();
+  showFinalIfReached();
   state.playTimer = setTimeout(playStep, currentDelay());
 }
 
