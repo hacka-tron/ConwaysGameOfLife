@@ -136,6 +136,10 @@ const state = {
   busyTimer: 0,
   playing: false,
   playTimer: 0,
+  // The final state of the board Play started from, fetched when Play starts, and that board's ID.
+  // The Final state panel appears when playback reaches it.
+  playFinal: null,
+  playFromId: null,
   logTotal: 0,
   // Edge rule of the drawn board, sent with every save. It is part of the board's ID.
   edgeMode: 'dead',
@@ -897,6 +901,17 @@ function jumpAhead() {
   });
 }
 
+function isFinalResponse(data) {
+  return (
+    data &&
+    isBoardResponse(data.board) &&
+    Number.isInteger(data.steps) &&
+    Number.isInteger(data.period) &&
+    data.steps >= 0 &&
+    data.period >= 1
+  );
+}
+
 function findFinal() {
   hideMsg(el.opsMsg);
   hideMsg(el.loadMsg);
@@ -907,16 +922,7 @@ function findFinal() {
     const result = await api('GET', `/boards/${encodeURIComponent(s.id)}/final`);
     if (!result.ok) return showProblem(el.opsMsg, result.problem);
     const data = result.data;
-    if (
-      !data ||
-      !isBoardResponse(data.board) ||
-      !Number.isInteger(data.steps) ||
-      !Number.isInteger(data.period) ||
-      data.steps < 0 ||
-      data.period < 1
-    ) {
-      return showProblem(el.opsMsg, badResponse(result.status));
-    }
+    if (!isFinalResponse(data)) return showProblem(el.opsMsg, badResponse(result.status));
     setCurrent(data.board, { gen: s.gen === null ? null : s.gen + BigInt(data.steps) });
     showFinal(data, s.id);
   });
@@ -932,6 +938,8 @@ function finalCellSize(board) {
 function hideFinal() {
   el.finalCard.hidden = true;
   finalBoard = null;
+  state.playFinal = null;
+  state.playFromId = null;
 }
 
 function showFinal(data, fromId) {
@@ -985,7 +993,27 @@ async function startPlay() {
   state.playing = true;
   state.busy = true;
   updateUI();
+  fetchPlayFinal(state.stored.id);
   playStep();
+}
+
+// Runs alongside playback. If the board never settles within the step limit, Play simply never shows the panel.
+async function fetchPlayFinal(fromId) {
+  state.playFinal = null;
+  state.playFromId = fromId;
+  const result = await api('GET', `/boards/${encodeURIComponent(fromId)}/final`);
+  // Kept after Play stops, so a slow answer still shows if playback ended on the final board.
+  // hideFinal clears playFromId when the board changes, which drops answers that no longer apply.
+  if (state.playFromId !== fromId || !result.ok || !isFinalResponse(result.data)) return;
+  state.playFinal = result.data;
+  // Playback may already be at or past the final board by the time the answer arrives.
+  showPlayFinalIfReached();
+}
+
+function showPlayFinalIfReached() {
+  if (!state.playFinal || state.stored?.id !== state.playFinal.board.id) return;
+  showFinal(state.playFinal, state.playFromId);
+  state.playFinal = null;
 }
 
 function stopPlay(message) {
@@ -1014,6 +1042,7 @@ async function playStep() {
     return;
   }
   setCurrent(result.data, { gen: s.gen === null ? null : s.gen + 1n });
+  showPlayFinalIfReached();
   state.playTimer = setTimeout(playStep, currentDelay());
 }
 
