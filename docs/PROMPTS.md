@@ -359,3 +359,11 @@ also teh final state section doesn't clear when I start a new run, make sure tha
 ```
 
 The Final state panel now hides when the board is edited, loaded, stepped, jumped or played, so it only shows for the latest Find final state.
+
+### 45
+
+```text
+also when i reach a final state while playing it doesn't show that, when playing, make a call to grab final state, that way you can show that section when you reach that
+```
+
+Play now asks for the final state when it starts and shows the Final state panel once playback reaches that board.
