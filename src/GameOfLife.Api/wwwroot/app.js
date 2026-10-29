@@ -3,6 +3,8 @@
 
 const MAX_SIDE = 256;
 const LOG_LIMIT = 50;
+// Requests faster than this never show a busy state, so quick clicks do not flash every control.
+const BUSY_DELAY_MS = 300;
 const MAX_CELL_PX = 40;
 const GRID_MIN_CELL_PX = 6;
 const RANDOM_DENSITY = 0.3;
@@ -129,7 +131,10 @@ const state = {
   // gen is a BigInt counting generations since the last save or load, or null when unknown.
   stored: null,
   edited: false,
+  // busy blocks new actions at once. showBusy greys out the controls, only once a request is slow.
   busy: false,
+  showBusy: false,
+  busyTimer: 0,
   playing: false,
   playTimer: 0,
   logTotal: 0,
@@ -737,9 +742,9 @@ function updateUI() {
     ? 'Each result becomes the current board.'
     : 'The drawn board is saved automatically the first time you run an operation on it.';
 
-  const idle = !state.busy;
+  const idle = !state.showBusy && !state.playing;
   // Read-only rather than disabled, so the field keeps focus while a load runs.
-  el.loadId.readOnly = state.busy && !state.playing;
+  el.loadId.readOnly = state.showBusy && !state.playing;
   el.next.disabled = !idle;
   el.final.disabled = !idle;
   el.jump.disabled = !idle;
@@ -747,7 +752,7 @@ function updateUI() {
   el.play.setAttribute('aria-pressed', String(state.playing));
   el.playLabel.textContent = state.playing ? 'Pause' : 'Play';
 
-  const locked = editingLocked();
+  const locked = state.showBusy && !state.playing;
   for (const control of [el.clear, el.random, el.width, el.height, ...el.presets.children]) {
     control.disabled = locked;
   }
@@ -759,12 +764,17 @@ function updateUI() {
 async function runBusy(button, action) {
   if (state.busy) return;
   state.busy = true;
-  button?.classList.add('is-busy');
-  updateUI();
+  state.busyTimer = setTimeout(() => {
+    state.showBusy = true;
+    button?.classList.add('is-busy');
+    updateUI();
+  }, BUSY_DELAY_MS);
   try {
     await action();
   } finally {
+    clearTimeout(state.busyTimer);
     state.busy = false;
+    state.showBusy = false;
     button?.classList.remove('is-busy');
     updateUI();
   }

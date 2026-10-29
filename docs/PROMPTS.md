@@ -227,3 +227,11 @@ also I think the api log and history is redundant, just keep the api log
 ```
 
 The History panel was removed from the browser UI. The API log stays.
+
+### 30
+
+```text
+also the whole UI flickers when I click the button, why is that? can we avoid this without a frontend framework?
+```
+
+The flicker was traced and fixed in plain JavaScript and CSS, without a framework.
