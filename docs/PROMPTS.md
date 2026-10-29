@@ -155,3 +155,11 @@ also on a separate agent, I want to make a simple gui for this to make it easier
 ```
 
 A second agent built a browser UI served by the API as static files. A user can draw a board, upload it, and step, jump ahead or find the final state while watching the board and the API calls.
+
+### 21
+
+```text
+ok can you run it so I can test it out
+```
+
+The API was started locally so the owner could try the browser UI and the endpoints by hand.
