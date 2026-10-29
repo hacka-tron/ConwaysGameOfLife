@@ -7,6 +7,13 @@ public sealed record UploadBoardRequest
     /// <summary>Rows of cells from top to bottom. 1 is a live cell, 0 is a dead cell.</summary>
     /// <example>[[0,1,0],[0,1,0],[0,1,0]]</example>
     public int[][]? Cells { get; init; }
+
+    /// <summary>
+    /// "dead" if cells beyond the border are dead, "wrap" if edges wrap around. Optional, and the
+    /// server's default is used when it is left out. The rule is part of the board's ID.
+    /// </summary>
+    /// <example>wrap</example>
+    public string? EdgeMode { get; init; }
 }
 
 /// <param name="Id">Content-derived ID. The same board always has the same ID.</param>
@@ -48,5 +55,5 @@ public sealed record FinalStateResponse(BoardResponse Board, int Steps, int Peri
 /// <param name="MaxWidth">Widest board accepted.</param>
 /// <param name="MaxHeight">Tallest board accepted.</param>
 /// <param name="MaxSteps">Most generations computed for one request.</param>
-/// <param name="EdgeMode">Edge rule given to new uploads. It is part of each board's ID.</param>
-public sealed record SettingsResponse(int MaxWidth, int MaxHeight, int MaxSteps, string EdgeMode);
+/// <param name="DefaultEdgeMode">Edge rule given to uploads that do not name one. It is part of each board's ID.</param>
+public sealed record SettingsResponse(int MaxWidth, int MaxHeight, int MaxSteps, string DefaultEdgeMode);

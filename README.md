@@ -1,22 +1,93 @@
 # Game of Life API
 
-A REST API for Conway's Game of Life, written in C# on .NET 8. Upload a board, then ask for its next generation, the board N generations ahead, or the state it finally settles into. A small browser UI is included for drawing boards and watching the API work. It shows a drawn board's ID as you draw, using the same hash as the server, and saves the board the first time an operation needs it.
+A REST API for Conway's Game of Life, written in C# on .NET 8, with a browser UI for drawing boards and watching the API work.
 
-## Running it
+## Overview
 
-You need the .NET 8 SDK.
+Upload a board and get back an ID. Then ask for its next generation, the board any number of generations ahead, or the state it finally settles into. Every answer is a board with its own ID, so results can be chained and shared.
+
+- **A board's ID is its content.** The ID is a hash of the board's size, edge rule and cells. The same board always gets the same ID, uploading it twice is harmless, and anyone can work out an ID without asking the server. The browser UI does exactly that as you draw.
+- **Work is done once.** Each board's next generation and final state are stored the first time they are computed. Asking again is a single lookup, from any board that leads to the same place.
+- **Cycles are handled with arithmetic.** Once a board starts repeating, any later generation follows from the cycle length. Asking a settled board for generation 10<sup>18</sup> takes milliseconds.
+- **Final state has one clear answer.** Still lifes and oscillators are both detected. For an oscillator the answer is a fixed member of its cycle, along with how many steps it takes to get there and the cycle length. Boards that never settle within the step limit get a clear error.
+- **Edges are part of the board.** Each board uses either dead edges, where cells beyond the border are dead, or wrapped edges, where opposite edges join. The same cells under a different rule are a different board with a different ID.
+- **Data survives restarts and crashes.** Boards are stored in LMDB, an embedded key-value store that writes every commit to disk before returning and never overwrites live data.
+- **Limits are configurable.** Board size, step limit, storage size, cache size and request size all come from settings and are checked at startup.
+- **Errors are consistent.** Every failure is an RFC 7807 problem details response with a fitting status code.
+- **A browser UI shows it working.** Draw a board, switch edge rules, step, jump, play, find the final state and load any board by ID, with a log of every API call.
+- **It is tested.** Unit tests cover the rules, IDs and cycle detection, and in-memory API tests cover every endpoint, validation, configuration and a restart.
+
+## Run it locally
+
+### 1. Install the .NET 8 SDK
+
+Check whether you already have it.
 
 ```bash
+dotnet --list-sdks
+```
+
+A line starting with `8.` means you are set. Otherwise install the .NET 8 SDK from https://dotnet.microsoft.com/download/dotnet/8.0 or with a package manager.
+
+```bash
+# macOS
+brew install dotnet@8
+
+# Windows
+winget install Microsoft.DotNet.SDK.8
+
+# Ubuntu
+sudo apt-get install -y dotnet-sdk-8.0
+```
+
+On macOS, Homebrew installs `dotnet@8` alongside other versions without adding it to your path. Run the two lines it prints after installing, or add these to your shell profile.
+
+```bash
+export PATH="/opt/homebrew/opt/dotnet@8/bin:$PATH"
+export DOTNET_ROOT="/opt/homebrew/opt/dotnet@8/libexec"
+```
+
+Nothing else is needed. The storage engine ships inside its NuGet package for Windows, macOS and Linux, so there is no database to install.
+
+### 2. Get the code and start the API
+
+```bash
+git clone https://github.com/hacka-tron/ConwaysGameOfLife.git
+cd ConwaysGameOfLife
 dotnet run --project src/GameOfLife.Api
 ```
 
-Then open http://localhost:5168 for the browser UI, or http://localhost:5168/swagger for the API reference. Boards are stored in `src/GameOfLife.Api/data/` and survive restarts.
+The first run restores packages and builds, which takes a minute. The API is ready when it prints `Now listening on: http://localhost:5168`. Stop it with Ctrl+C.
+
+### 3. Try it
+
+- **Browser UI** at http://localhost:5168. Draw a board or pick a pattern, choose dead or wrapped edges, then run Next generation, Jump ahead, Find final state or Play. The board's ID updates as you draw. The board is saved the first time you run an operation on it, and the API log at the bottom shows every request, with IDs you can click to copy.
+- **Swagger** at http://localhost:5168/swagger, to read and call each endpoint.
+- **curl**, as shown in the API section below.
+
+Boards are stored in `src/GameOfLife.Api/data/` and survive restarts. Delete that folder to start empty.
+
+### 4. Run the tests
 
 ```bash
 dotnet test
 ```
 
 The tests cover the rule engine, cycle detection, every endpoint, validation, configuration and persistence across a restart.
+
+### Changing settings
+
+Limits and defaults live in `src/GameOfLife.Api/appsettings.json` and are listed under Configuration below. Any of them can also be set for one run with an environment variable.
+
+```bash
+GameOfLife__MaxSteps=5000 dotnet run --project src/GameOfLife.Api
+```
+
+To use another port, pass `--urls`.
+
+```bash
+dotnet run --project src/GameOfLife.Api --urls http://localhost:6000
+```
 
 ## API
 
@@ -27,13 +98,15 @@ The tests cover the rule engine, cycle detection, every endpoint, validation, co
 | `GET` | `/boards/{id}/next` | The next generation, with its own ID. |
 | `GET` | `/boards/{id}/generations/{n}` | The board after `n` generations, with its own ID. |
 | `GET` | `/boards/{id}/final` | The state the board settles into, how many generations it took, and the cycle length. |
-| `GET` | `/settings` | The size and step limits, and the edge rule given to new uploads. |
+| `GET` | `/settings` | The size and step limits, and the edge rule used when an upload does not name one. |
 | `GET` | `/health` | `Healthy` when storage is reachable. |
 
 ```bash
 curl -s localhost:5168/boards -H 'content-type: application/json' \
   -d '{"cells":[[0,0,0,0,0],[0,0,0,0,0],[0,1,1,1,0],[0,0,0,0,0],[0,0,0,0,0]]}'
 ```
+
+`edgeMode` is optional. `"dead"` treats cells beyond the border as dead and is the default. `"wrap"` joins opposite edges. Any other value, including an empty string, is rejected. The same cells with a different edge rule are a different board with a different ID.
 
 ```json
 { "id": "1ccg4h2ptv9qxkxyg2zfhqejat", "width": 5, "height": 5, "edgeMode": "dead", "cells": [[0,0,0,0,0], …] }
@@ -43,62 +116,13 @@ Errors use RFC 7807 problem details.
 
 | Status | When |
 |---|---|
-| `400` | The grid is empty, ragged, larger than the configured maximum, or contains values other than 0 and 1. A negative generation count. |
+| `400` | The grid is empty, ragged, larger than the configured maximum, or contains values other than 0 and 1. An unknown edge rule. A negative generation count. |
 | `404` | No board has that ID. |
 | `413` | The request body is larger than the configured limit. |
 | `422` | The board did not settle within the configured step limit. |
 | `507` | Storage has reached its configured maximum size. |
 
-## Design
-
-### A board's ID is its content
-
-The ID comes from a SHA-256 hash of the board's width, height, edge rule and cells. The same board always gets the same ID, so uploading it twice returns the same ID, and an ID always means exactly one board. Because the ID depends only on the board, a client can work it out without asking the server. The browser UI does this as you draw.
-
-The ID keeps the first 128 bits of the hash and writes them as 26 lowercase characters, using the same alphabet as a ULID. 128 bits is the usual minimum for unique IDs. At that size two boards will not share an ID by chance, and nobody can find two that do on purpose. The store also compares the full board whenever an ID already exists, so a clash would be refused rather than return the wrong board. Size and edge rule are part of the hash because the same live cells evolve differently on a board of another size or with different edges. The hashed text starts with a version tag, so a future change to the format can produce new IDs without clashing with old ones.
-
-Every board has exactly one next generation, so stored boards form a graph of next links that fills in as requests arrive. Results are saved when first computed.
-
-- **Next** follows the stored link if there is one. Otherwise it computes one generation and stores the new board and the link together.
-- **Final** steps forward until a board's ID repeats. A still life repeats after one step and an oscillator after its period. The result is saved on the starting board, so the next request is a single lookup.
-- **N ahead** steps forward up to N. If the board starts repeating first, any later generation follows from arithmetic on the cycle. So asking a settled board for generation 10<sup>18</sup> takes milliseconds.
-
-A cycle has several boards, so "the final state" needs one fixed answer. It is the cycle member with the smallest ID. Every board that leads into the same cycle then reports the same final board, which keeps the cache consistent. `steps` is how many generations it takes to first reach that board.
-
-Only boards whose IDs are returned to a client are stored. The intermediate boards of a long run are dropped, because an ID cannot be turned back into a board and nobody can ask for one they were never given.
-
-### Storage
-
-Boards are stored in LMDB, an embedded key-value store, through the LightningDB package.
-
-| Key | Value |
-|---|---|
-| `board:{id}` | Format version, width, height, edge rule and the cells packed as bits. |
-| `next:{id}` | ID of the next generation. |
-| `final:{id}` | Steps, period and the ID of the final board. |
-
-Every lookup is by key, and every value is written once and never changes, so a key-value store fits better than a relational database. LMDB was chosen for four reasons.
-
-- Each commit is flushed to disk before it returns, and LMDB never overwrites live data. A crash cannot lose or corrupt committed boards, and there is no recovery step on startup.
-- Reads are lock-free from memory-mapped pages, which suits data that is written once and read many times.
-- It runs inside the process, so the project needs nothing beyond `dotnet run`. The NuGet package includes the native library for Windows, macOS and Linux.
-- A board and the link to it are written in one transaction.
-
-RocksDB was the main alternative. It is built for heavy write volume, which this service does not have. Microsoft's FASTER KV is faster still, but it saves to disk at checkpoints, so a crash can lose recent writes unless a checkpoint is forced before every response.
-
-An in-process cache sits in front of the store. Cached data can never be stale, because boards never change and their links only go from unknown to known.
-
-### Scaling beyond one machine
-
-An embedded store ties the service to one machine. The design is ready to move past that.
-
-- Every value is fully determined by its key, so two servers writing the same key always write the same value. There are no write conflicts to resolve.
-- Computing generations holds no state, so any number of API instances can run behind a load balancer.
-- Hash IDs spread evenly, so the data shards cleanly by ID prefix.
-
-Moving to a distributed store such as DynamoDB, Cosmos DB or a Redis cluster means writing one new `IBoardStore` class. The one rule to keep is that a board must be durably stored before its ID is returned.
-
-### Limits and configuration
+## Configuration
 
 All limits live in `src/GameOfLife.Api/appsettings.json` and can be overridden with environment variables such as `GameOfLife__MaxSteps=5000`. Invalid values stop the app at startup with a clear message.
 
@@ -107,47 +131,16 @@ All limits live in `src/GameOfLife.Api/appsettings.json` and can be overridden w
 | `GameOfLife:MaxWidth` | 256 | Widest board accepted. |
 | `GameOfLife:MaxHeight` | 256 | Tallest board accepted. |
 | `GameOfLife:MaxSteps` | 10000 | Most generations computed for one request. |
-| `GameOfLife:EdgeMode` | `Dead` | `Dead` treats cells beyond the border as dead. `Wrap` joins opposite edges. Applies to new uploads. Stored boards keep their own rule. |
+| `GameOfLife:DefaultEdgeMode` | `Dead` | Edge rule for uploads that do not name one. `Dead` treats cells beyond the border as dead. `Wrap` joins opposite edges. |
 | `Storage:Path` | `data/boards` | Folder for the LMDB files. |
 | `Storage:MaxSizeBytes` | 1 GB | Most space the store may use. |
 | `Storage:CacheSizeLimitBytes` | 64 MB | Memory for the in-process cache. |
 | `Kestrel:Limits:MaxRequestBodySize` | 1 MB | Largest request body. A full 256 x 256 board is about 130 KB. |
 
-A 256 x 256 board takes under a millisecond per generation on an Apple Silicon laptop. A random 256 x 256 board measured during development took 2,356 generations and 1.7 seconds to settle, and asking again took 9 ms. The worst case at the default limits is about 7 seconds of work, and requests stop early if the client disconnects.
+## Documentation
 
-### Known limits
-
-- The first request for a far generation or a final state on a new board computes on the request thread, for up to `MaxSteps` generations. There is no cap on concurrent requests, so several slow requests at once compete for CPU. Rate limiting or a work queue would fix this in production.
-- With `Wrap` edges, a board one or two cells wide counts the same cell as a neighbour more than once, the way a torus that small works mathematically. A single live cell on a 1 x 1 wrapped board therefore has 8 live neighbours and dies.
-- LMDB allows 126 concurrent readers by default. Reads take microseconds, so this is far beyond what one instance would reach, but it is a setting to raise under heavy load.
-
-### Code layout
-
-```
-src/
-  GameOfLife.Core            Domain logic with no I/O
-    Board.cs                 Immutable board, packed cells, content-hash ID
-    LifeEngine.cs            One generation under the B3/S23 rule, dead or wrapped edges
-    LifeSimulator.cs         Runs generations, detects cycles, skips ahead on a cycle
-    BoardService.cs          The API operations, saving results as they are computed
-    Storage/IBoardStore.cs   Storage interface
-  GameOfLife.Infrastructure
-    LmdbBoardStore.cs        LMDB storage
-    CachedBoardStore.cs      In-memory cache in front of any store
-  GameOfLife.Api
-    Controllers/             HTTP endpoints
-    BoardRequestValidator.cs Upload validation against the configured limits
-    BoardExceptionHandler.cs Maps failures to problem details
-    wwwroot/                 Browser UI
-tests/
-  GameOfLife.Tests           Unit tests (Unit/) and in-memory API tests (Integration/)
-```
-
-### What I would do next
-
-- **Faster generations.** Packing 64 cells into each machine word lets one step compute many cells at once. Hashlife caches the future of repeated regions and suits very large patterns.
-- **Resume long runs.** Remember how far a board got before hitting the step limit, so a later request continues from there.
-- **Operations.** Rate limiting, metrics, a container image, and a retention policy for boards nobody has requested in a long time.
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) explains the design. It covers content-hash IDs, how results are computed once and reused, cycle handling, storage, the browser UI, performance, scaling and known limits.
+- [docs/PROMPTS.md](docs/PROMPTS.md) records every prompt sent to the AI coding assistant while building this.
 
 ## How this was built
 

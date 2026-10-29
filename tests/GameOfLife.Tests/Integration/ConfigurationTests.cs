@@ -69,11 +69,11 @@ public sealed class ConfigurationTests : IDisposable
     }
 
     [Fact]
-    public async Task EdgeModeComesFromSettings()
+    public async Task DefaultEdgeModeComesFromSettings()
     {
         using var factory = new ApiFactory(_storage.Path, new Dictionary<string, string>
         {
-            ["GameOfLife:EdgeMode"] = "Wrap",
+            ["GameOfLife:DefaultEdgeMode"] = "Wrap",
         });
         var client = factory.CreateClient();
 
@@ -90,7 +90,7 @@ public sealed class ConfigurationTests : IDisposable
         {
             ["GameOfLife:MaxWidth"] = "64",
             ["GameOfLife:MaxSteps"] = "500",
-            ["GameOfLife:EdgeMode"] = "Wrap",
+            ["GameOfLife:DefaultEdgeMode"] = "Wrap",
         });
 
         var settings = await factory.CreateClient().GetFromJsonAsync<SettingsResponse>("/settings");

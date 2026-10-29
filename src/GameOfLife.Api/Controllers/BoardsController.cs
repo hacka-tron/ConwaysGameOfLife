@@ -19,12 +19,14 @@ public sealed class BoardsController(BoardService boards, IOptions<GameOfLifeOpt
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<BoardResponse>> Upload(UploadBoardRequest request, CancellationToken cancellationToken)
     {
-        if (!BoardRequestValidator.TryParse(request.Cells, options.Value, ModelState, out var cells))
+        // A single | runs both checks, so one response reports every problem with the request.
+        if (!BoardRequestValidator.TryParse(request.Cells, options.Value, ModelState, out var cells)
+            | !BoardRequestValidator.TryParseEdgeMode(request.EdgeMode, options.Value.DefaultEdgeMode, ModelState, out var edgeMode))
         {
             return ValidationProblem(ModelState);
         }
 
-        var (board, created) = await boards.UploadAsync(cells, cancellationToken);
+        var (board, created) = await boards.UploadAsync(cells, edgeMode, cancellationToken);
         var response = BoardResponse.From(board);
         return created ? CreatedAtAction(nameof(Get), new { id = board.Id }, response) : Ok(response);
     }

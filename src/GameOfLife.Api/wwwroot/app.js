@@ -81,12 +81,11 @@ const el = {
   boardId: $('board-id'),
   copyId: $('copy-id'),
   copyIdLabel: $('copy-id-label'),
-  metaSize: $('meta-size'),
+  edgeInputs: document.querySelectorAll('#edge-modes input'),
+  load: $('load'),
   metaAlive: $('meta-alive'),
   metaGenWrap: $('meta-gen-wrap'),
   metaGen: $('meta-gen'),
-  metaEdgeWrap: $('meta-edge-wrap'),
-  metaEdge: $('meta-edge'),
   stage: $('stage'),
   canvas: $('board'),
   boardFoot: document.querySelector('.board-foot'),
@@ -138,10 +137,9 @@ const state = {
   playing: false,
   playTimer: 0,
   logTotal: 0,
-  // Edge rule the server gives new uploads, read from GET /settings. It is part of every board ID,
-  // so drawn boards get no ID until it is known.
-  edgeMode: null,
-  // True when the browser cannot work out IDs, because settings failed to load or hashing is unavailable.
+  // Edge rule of the drawn board, sent with every save. It is part of the board's ID.
+  edgeMode: 'dead',
+  // True when the browser cannot work out IDs, because hashing is unavailable.
   idUnavailable: false,
   // ID of the drawn board, worked out in the browser. Null while it is being computed.
   localId: null,
@@ -271,7 +269,6 @@ async function refreshLocalId() {
   const cells = state.cells.slice();
   // Cleared before hashing so Copy ID never offers the previous drawing's ID.
   state.localId = null;
-  if (!edgeMode) return null;
   let id;
   try {
     id = await computeId(width, height, edgeMode, cells);
@@ -357,7 +354,12 @@ function resize(width, height) {
 // Called after any local change to the drawn cells.
 function boardEdited() {
   const s = state.stored;
-  state.edited = !s || s.width !== state.width || s.height !== state.height || !sameCells(s.cells, state.cells);
+  state.edited =
+    !s ||
+    s.width !== state.width ||
+    s.height !== state.height ||
+    s.edgeMode !== state.edgeMode ||
+    !sameCells(s.cells, state.cells);
   scheduleDraw();
   refreshLocalId();
   updateUI();
@@ -375,6 +377,8 @@ function setCurrent(board, { gen }) {
     cells: state.cells.slice(),
     gen,
   };
+  state.edgeMode = board.edgeMode;
+  syncEdgeInputs();
   state.edited = false;
   state.localId = board.id;
   state.idRequest++;
@@ -586,6 +590,20 @@ for (const input of [el.width, el.height]) {
   });
 }
 
+function syncEdgeInputs() {
+  for (const input of el.edgeInputs) input.checked = input.value === state.edgeMode;
+}
+
+// Switching edges makes a different board, with its own ID.
+for (const input of el.edgeInputs) {
+  input.addEventListener('change', () => {
+    localEdit(() => {
+      state.edgeMode = input.value;
+    });
+    syncEdgeInputs();
+  });
+}
+
 function localEdit(action) {
   if (editingLocked()) return;
   if (state.playing) stopPlay('Playback paused because the board was edited.');
@@ -723,18 +741,9 @@ function updateUI() {
   }
   el.copyId.hidden = !shownId();
 
-  el.metaSize.textContent = `${state.width} × ${state.height}`;
   el.metaAlive.textContent = population(state.cells).toLocaleString('en-US');
   el.metaGenWrap.hidden = !operable || s.gen === null;
   if (operable && s.gen !== null) el.metaGen.textContent = formatBig(s.gen);
-  el.metaEdgeWrap.hidden = !operable;
-  if (operable) {
-    const wrap = s.edgeMode === 'wrap';
-    el.metaEdge.textContent = wrap ? 'wrap around' : 'dead';
-    el.metaEdgeWrap.title = wrap
-      ? 'Opposite edges join, so a cell on the right edge neighbours the cell on the left edge.'
-      : 'Cells beyond the border always count as dead.';
-  }
 
   el.boardFoot.classList.toggle('is-edited', state.edited && Boolean(s));
   el.draftNote.textContent =
@@ -753,7 +762,9 @@ function updateUI() {
   el.playLabel.textContent = state.playing ? 'Pause' : 'Play';
 
   const locked = state.showBusy && !state.playing;
-  for (const control of [el.clear, el.random, el.width, el.height, ...el.presets.children]) {
+  // Loading during Play is allowed. It stops playback first.
+  el.load.disabled = state.showBusy && !state.playing;
+  for (const control of [el.clear, el.random, el.width, el.height, ...el.presets.children, ...el.edgeInputs]) {
     control.disabled = locked;
   }
   el.canvas.classList.toggle('is-locked', locked);
@@ -785,7 +796,7 @@ async function runBusy(button, action) {
 // Sends the drawn board to POST /boards and makes the stored copy current. Returns the result, or null after
 // showing the problem in target.
 async function saveBoard(target) {
-  const result = await api('POST', '/boards', { cells: toRows() });
+  const result = await api('POST', '/boards', { cells: toRows(), edgeMode: state.edgeMode });
   if (!result.ok) {
     showProblem(target, result.problem);
     return null;
@@ -1123,7 +1134,7 @@ el.jumpForm.addEventListener('submit', (event) => {
 el.jumpN.addEventListener('input', () => el.jumpN.removeAttribute('aria-invalid'));
 el.loadForm.addEventListener('submit', (event) => {
   event.preventDefault();
-  if (!el.loadId.readOnly) loadById();
+  if (!el.load.disabled) loadById();
 });
 el.loadId.addEventListener('input', () => {
   el.loadId.removeAttribute('aria-invalid');
@@ -1154,20 +1165,7 @@ new ResizeObserver(() => {
 }).observe(el.stage);
 window.addEventListener('resize', layoutCanvas);
 
-async function loadSettings() {
-  const result = await api('GET', '/settings');
-  if (!result.ok || typeof result.data?.edgeMode !== 'string') {
-    // Guessing the edge rule could show an ID the server would not assign, so show none.
-    state.idUnavailable = true;
-    updateUI();
-    return;
-  }
-  state.edgeMode = result.data.edgeMode;
-  if (!canOperate()) refreshLocalId();
-}
-
 updateSpeedLabel();
-loadSettings();
 placePreset(PRESETS.find((p) => p.key === 'glider'));
 hideMsg(el.boardMsg);
 layoutCanvas();
