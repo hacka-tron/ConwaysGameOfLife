@@ -171,3 +171,35 @@ this is good, but there is no option to manually enter an id. also these ids are
 ```
 
 A field was added to the browser UI for loading a board by ID, and shorter ID formats were weighed.
+
+### 23
+
+```text
+what are the changes for collisions at 16 chars? also can including special chars help?
+```
+
+Collision odds for 16 character IDs were worked out, along with how much a larger character set would shorten them.
+
+### 24
+
+```text
+what is the industry standard for unique keys like this?
+```
+
+Common industry ID formats were compared, which moved the recommendation to 128 bit IDs.
+
+### 25
+
+```text
+yeah that is fine, also is there any way to not force someone to click upload manually? like they just draw the board, and get a deterministic id?
+```
+
+IDs moved to 26 lowercase characters (128 bits). The browser UI now works out a drawn board's ID as you draw and saves the board on its own the first time an operation needs it.
+
+### 26
+
+```text
+like each board would just be a has, and that hash can be compared?
+```
+
+Confirmed the approach. The browser hashes the drawn board the same way the server does, so the ID it shows matches the server's and can be compared directly.

@@ -38,7 +38,7 @@ public class BoardTests
     {
         // Stored IDs must keep resolving. If this fails, the ID format changed and needs a new version prefix.
         Assert.Equal(
-            "8a5968060bd5827231b6fcb6d2cc4db1e4f8f72f3234e9965e84405cedbd43ba",
+            "05an0qnggbt15b316pw8tn6kw3",
             Patterns.Parse("#.", ".#").Id);
     }
 

@@ -84,6 +84,21 @@ public sealed class ConfigurationTests : IDisposable
     }
 
     [Fact]
+    public async Task SettingsEndpointReportsConfiguredValues()
+    {
+        using var factory = new ApiFactory(_storage.Path, new Dictionary<string, string>
+        {
+            ["GameOfLife:MaxWidth"] = "64",
+            ["GameOfLife:MaxSteps"] = "500",
+            ["GameOfLife:EdgeMode"] = "Wrap",
+        });
+
+        var settings = await factory.CreateClient().GetFromJsonAsync<SettingsResponse>("/settings");
+
+        Assert.Equal(new SettingsResponse(64, 256, 500, "wrap"), settings);
+    }
+
+    [Fact]
     public void InvalidSettingsStopTheAppFromStarting()
     {
         using var factory = new ApiFactory(_storage.Path, new Dictionary<string, string>
