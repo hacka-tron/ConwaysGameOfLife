@@ -44,3 +44,9 @@ public sealed record FinalStateResponse(BoardResponse Board, int Steps, int Peri
         final.Period,
         final.Period == 1 ? "still-life" : "oscillator");
 }
+
+/// <param name="MaxWidth">Widest board accepted.</param>
+/// <param name="MaxHeight">Tallest board accepted.</param>
+/// <param name="MaxSteps">Most generations computed for one request.</param>
+/// <param name="EdgeMode">Edge rule given to new uploads. It is part of each board's ID.</param>
+public sealed record SettingsResponse(int MaxWidth, int MaxHeight, int MaxSteps, string EdgeMode);

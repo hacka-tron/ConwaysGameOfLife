@@ -145,6 +145,11 @@ const state = {
   lastSeen: new Map(),
   currentSeq: null,
   logTotal: 0,
+  // Edge rule the server gives new uploads, read from GET /settings. It is part of every board ID.
+  edgeMode: 'dead',
+  // ID of the drawn board, worked out in the browser. Null while it is being computed.
+  localId: null,
+  idRequest: 0,
 };
 
 // ---------------------------------------------------------------- API
@@ -236,6 +241,57 @@ function isBoardResponse(data) {
   );
 }
 
+// ---------------------------------------------------------------- Board IDs
+
+// Mirrors Board.ComputeId on the server, so a drawn board shows the ID the server will give it.
+// Every board the server returns is checked against this, so the two cannot drift apart unnoticed.
+const ID_VERSION = 'gol-v2';
+const ID_ALPHABET = '0123456789abcdefghjkmnpqrstvwxyz';
+const ID_LENGTH = 26;
+
+async function computeId(width, height, edgeMode, cells) {
+  const header = new TextEncoder().encode(`${ID_VERSION}|${edgeMode}|${width}x${height}|`);
+  const data = new Uint8Array(header.length + Math.ceil((width * height) / 8));
+  data.set(header);
+  // Row-major bitset, least significant bit first, matching the server's packed cells.
+  for (let i = 0; i < cells.length; i++) {
+    if (cells[i]) data[header.length + (i >> 3)] |= 1 << (i & 7);
+  }
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', data));
+  let value = 0n;
+  for (let i = 0; i < 16; i++) value = (value << 8n) | BigInt(digest[i]);
+  let id = '';
+  for (let i = 0; i < ID_LENGTH; i++) {
+    id = ID_ALPHABET[Number(value & 31n)] + id;
+    value >>= 5n;
+  }
+  return id;
+}
+
+async function refreshLocalId() {
+  const request = ++state.idRequest;
+  const { width, height, edgeMode } = state;
+  const cells = state.cells.slice();
+  state.localId = null;
+  const id = await computeId(width, height, edgeMode, cells);
+  // A later edit started its own computation. Keep only the newest.
+  if (request !== state.idRequest) return null;
+  state.localId = id;
+  updateUI();
+  return id;
+}
+
+async function checkServerId(board) {
+  const local = await computeId(board.width, board.height, board.edgeMode, fromRows(board.cells, board.width, board.height));
+  if (local !== board.id) {
+    showInfo(
+      el.boardMsg,
+      `The browser worked out ID ${local} for this board but the server says ${board.id}. The two ID formats are out of step.`,
+      'error',
+    );
+  }
+}
+
 // ---------------------------------------------------------------- Board model
 
 function index(x, y) {
@@ -290,6 +346,7 @@ function boardEdited() {
   state.edited = !s || s.width !== state.width || s.height !== state.height || !sameCells(s.cells, state.cells);
   scheduleDraw();
   updateUI();
+  refreshLocalId();
 }
 
 function setCurrent(board, { via, gen, seq }) {
@@ -305,6 +362,9 @@ function setCurrent(board, { via, gen, seq }) {
     gen,
   };
   state.edited = false;
+  state.localId = board.id;
+  state.idRequest++;
+  checkServerId(board);
   syncSizeInputs();
   if (via) {
     addHistory(board.id, via, gen);
@@ -624,7 +684,12 @@ function plural(count, one, many) {
 }
 
 function shortenPath(path) {
-  return path.replace(/[0-9a-f]{64}/gi, (id) => shortId(id));
+  return path.replace(/(?<=\/boards\/)[0-9a-z]{26}/g, (id) => shortId(id));
+}
+
+// The ID shown for the current board. The stored ID, or the one worked out for an unsaved drawing.
+function shownId() {
+  return canOperate() ? state.stored.id : state.localId;
 }
 
 // ---------------------------------------------------------------- UI state
@@ -637,17 +702,11 @@ function updateUI() {
   const s = state.stored;
   const operable = canOperate();
 
-  if (!s) {
-    el.stateBadge.dataset.kind = 'draft';
-    el.stateBadge.textContent = 'Draft';
-    el.boardId.textContent = 'Not uploaded yet';
-    el.boardId.title = '';
-    el.boardId.classList.remove('is-stored');
-  } else if (state.edited) {
-    el.stateBadge.dataset.kind = 'edited';
-    el.stateBadge.textContent = 'Unsaved draft';
-    el.boardId.textContent = `Edited from ${shortId(s.id)}`;
-    el.boardId.title = s.id;
+  if (!operable) {
+    el.stateBadge.dataset.kind = s ? 'edited' : 'draft';
+    el.stateBadge.textContent = 'Not saved yet';
+    el.boardId.textContent = state.localId ? shortId(state.localId) : 'Working out ID';
+    el.boardId.title = state.localId ? `${state.localId}. Saved automatically when you run an operation.` : '';
     el.boardId.classList.remove('is-stored');
   } else {
     el.stateBadge.dataset.kind = 'stored';
@@ -656,7 +715,7 @@ function updateUI() {
     el.boardId.title = s.id;
     el.boardId.classList.add('is-stored');
   }
-  el.copyId.hidden = !operable;
+  el.copyId.hidden = !shownId();
 
   el.metaSize.textContent = `${state.width} × ${state.height}`;
   el.metaAlive.textContent = population(state.cells).toLocaleString('en-US');
@@ -668,23 +727,21 @@ function updateUI() {
   el.boardFoot.classList.toggle('is-edited', state.edited && Boolean(s));
   el.draftNote.textContent =
     state.edited && s
-      ? 'This board has changed since it was stored. Upload it again to run operations on it.'
+      ? 'This board has changed since it was stored. Running an operation saves it first.'
       : 'Click or drag to toggle cells. Dragging paints the opposite of the first cell you touch.';
 
-  el.opsHint.textContent = !s
-    ? 'Upload the board to run operations on it.'
-    : state.edited
-      ? 'The drawn board is an unsaved draft. Upload it to run operations on it.'
-      : 'Each result becomes the current board and is added to the history.';
+  el.opsHint.textContent = operable
+    ? 'Each result becomes the current board and is added to the history.'
+    : 'The drawn board is saved automatically the first time you run an operation on it.';
 
   const idle = !state.busy;
   el.upload.disabled = state.busy && !state.playing;
   el.load.disabled = state.busy && !state.playing;
   el.upload.textContent = s && !state.edited ? 'Upload board again' : 'Upload board';
-  el.next.disabled = !operable || !idle;
-  el.final.disabled = !operable || !idle;
-  el.jump.disabled = !operable || !idle;
-  el.play.disabled = !operable || (!idle && !state.playing);
+  el.next.disabled = !idle;
+  el.final.disabled = !idle;
+  el.jump.disabled = !idle;
+  el.play.disabled = !idle && !state.playing;
   el.play.setAttribute('aria-pressed', String(state.playing));
   el.playLabel.textContent = state.playing ? 'Pause' : 'Play';
 
@@ -715,15 +772,35 @@ async function runBusy(button, action) {
 
 // ---------------------------------------------------------------- Operations
 
+// Sends the drawn board to POST /boards and makes the stored copy current. Returns the result, or null after
+// showing the problem in target.
+async function saveBoard(target) {
+  const result = await api('POST', '/boards', { cells: toRows() });
+  if (!result.ok) {
+    showProblem(target, result.problem);
+    return null;
+  }
+  if (!isBoardResponse(result.data)) {
+    showProblem(target, badResponse(result.status));
+    return null;
+  }
+  setCurrent(result.data, { via: 'upload', gen: 0n });
+  return result;
+}
+
+// Operations run on stored boards. Saves the drawn board first when it is not stored yet.
+async function ensureStored(target) {
+  if (canOperate()) return state.stored;
+  return (await saveBoard(target)) ? state.stored : null;
+}
+
 function upload() {
   if (state.playing) stopPlay();
   hideMsg(el.uploadMsg);
   hideMsg(el.opsMsg);
   return runBusy(el.upload, async () => {
-    const result = await api('POST', '/boards', { cells: toRows() });
-    if (!result.ok) return showProblem(el.uploadMsg, result.problem);
-    if (!isBoardResponse(result.data)) return showProblem(el.uploadMsg, badResponse(result.status));
-    setCurrent(result.data, { via: 'upload', gen: 0n });
+    const result = await saveBoard(el.uploadMsg);
+    if (!result) return;
     const id = shortId(result.data.id);
     if (result.status === 201) {
       showInfo(el.uploadMsg, `Stored as a new board with ID ${id}. The server answered 201 Created.`, 'success');
@@ -767,7 +844,8 @@ async function fetchNext() {
 function nextGeneration() {
   hideMsg(el.opsMsg);
   return runBusy(el.next, async () => {
-    const s = state.stored;
+    const s = await ensureStored(el.opsMsg);
+    if (!s) return;
     const result = await fetchNext();
     if (!result.ok) return showProblem(el.opsMsg, result.problem);
     setCurrent(result.data, { via: 'next', gen: s.gen === null ? null : s.gen + 1n });
@@ -793,7 +871,8 @@ function jumpAhead() {
   el.jumpN.removeAttribute('aria-invalid');
   const n = BigInt(raw);
   return runBusy(el.jump, async () => {
-    const s = state.stored;
+    const s = await ensureStored(el.opsMsg);
+    if (!s) return;
     const result = await api('GET', `/boards/${encodeURIComponent(s.id)}/generations/${n.toString()}`);
     if (!result.ok) return showProblem(el.opsMsg, result.problem);
     if (!isBoardResponse(result.data)) return showProblem(el.opsMsg, badResponse(result.status));
@@ -804,7 +883,8 @@ function jumpAhead() {
 function findFinal() {
   hideMsg(el.opsMsg);
   return runBusy(el.final, async () => {
-    const s = state.stored;
+    const s = await ensureStored(el.opsMsg);
+    if (!s) return;
     const result = await api('GET', `/boards/${encodeURIComponent(s.id)}/final`);
     if (!result.ok) return showProblem(el.opsMsg, result.problem);
     const data = result.data;
@@ -867,9 +947,13 @@ function currentDelay() {
   return SPEEDS[Number(el.speed.value)]?.delay ?? 250;
 }
 
-function startPlay() {
-  if (!canOperate() || state.busy) return;
+async function startPlay() {
+  if (state.busy) return;
   hideMsg(el.opsMsg);
+  if (!canOperate()) {
+    await runBusy(el.play, () => ensureStored(el.opsMsg));
+    if (!canOperate() || state.busy) return;
+  }
   state.playing = true;
   state.busy = true;
   updateUI();
@@ -1077,7 +1161,7 @@ async function checkHealth() {
 el.health.addEventListener('click', checkHealth);
 
 el.copyId.addEventListener('click', async () => {
-  const id = state.stored?.id;
+  const id = shownId();
   if (!id) return;
   let copied = false;
   try {
@@ -1137,7 +1221,15 @@ new ResizeObserver(() => {
 }).observe(el.stage);
 window.addEventListener('resize', layoutCanvas);
 
+async function loadSettings() {
+  const result = await api('GET', '/settings');
+  if (!result.ok || typeof result.data?.edgeMode !== 'string') return;
+  state.edgeMode = result.data.edgeMode;
+  if (!canOperate()) refreshLocalId();
+}
+
 updateSpeedLabel();
+loadSettings();
 placePreset(PRESETS.find((p) => p.key === 'glider'));
 hideMsg(el.boardMsg);
 layoutCanvas();

@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -10,7 +11,13 @@ namespace GameOfLife.Core;
 public sealed class Board
 {
     // Bumping this version gives every board a new ID, for example if the hashed layout changes.
-    private const string IdVersion = "gol-v1";
+    private const string IdVersion = "gol-v2";
+
+    // Crockford base32, the alphabet ULIDs use. It has no i, l, o or u, so IDs are hard to misread.
+    private const string IdAlphabet = "0123456789abcdefghjkmnpqrstvwxyz";
+
+    /// <summary>Length of every board ID.</summary>
+    public const int IdLength = 26;
 
     // Row-major bitset. Cell (x, y) is bit (y * Width + x), least significant bit first.
     private readonly byte[] _cells;
@@ -24,7 +31,10 @@ public sealed class Board
         Id = ComputeId(width, height, edgeMode, cells);
     }
 
-    /// <summary>Lowercase hex SHA-256 of the board's dimensions, edge rule and cells.</summary>
+    /// <summary>
+    /// The first 128 bits of a SHA-256 of the board's dimensions, edge rule and cells, as 26 lowercase
+    /// base32 characters. 128 bits keeps accidental and deliberate collisions out of reach.
+    /// </summary>
     public string Id { get; }
 
     public int Width { get; }
@@ -127,6 +137,20 @@ public sealed class Board
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         hash.AppendData(header);
         hash.AppendData(cells);
-        return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+        return EncodeId(hash.GetHashAndReset());
+    }
+
+    private static string EncodeId(byte[] digest)
+    {
+        // Same layout as a ULID. 128 bits fill 26 characters with two spare high bits, so the first character is 0 to 7.
+        UInt128 value = BinaryPrimitives.ReadUInt128BigEndian(digest);
+        return string.Create(IdLength, value, static (chars, remaining) =>
+        {
+            for (int i = chars.Length - 1; i >= 0; i--)
+            {
+                chars[i] = IdAlphabet[(int)(remaining & 31)];
+                remaining >>= 5;
+            }
+        });
     }
 }

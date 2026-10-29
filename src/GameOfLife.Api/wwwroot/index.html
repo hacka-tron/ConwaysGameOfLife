@@ -17,7 +17,7 @@
       </svg>
       <div>
         <h1>Game of Life API</h1>
-        <p class="tagline">Draw a board, upload it, then run each operation</p>
+        <p class="tagline">Draw a board and run operations on it. Its ID updates as you draw</p>
       </div>
     </div>
     <button type="button" class="health" id="health" data-state="pending" title="Check GET /health again">
@@ -30,8 +30,8 @@
     <section class="stage-panel" aria-label="Board">
       <div class="board-bar">
         <div class="board-identity">
-          <span class="badge" id="state-badge" data-kind="draft">Draft</span>
-          <code class="board-id" id="board-id">Not uploaded yet</code>
+          <span class="badge" id="state-badge" data-kind="draft">Not saved yet</span>
+          <code class="board-id" id="board-id">Working out ID</code>
           <button type="button" class="btn btn-small btn-ghost" id="copy-id" hidden>Copy ID</button>
         </div>
         <dl class="board-meta">
@@ -77,7 +77,7 @@
 
       <section class="card" aria-labelledby="h-upload">
         <h2 id="h-upload">Upload</h2>
-        <p class="hint">Sends the drawn board to <code>POST /boards</code>. Identical boards always get the same ID.</p>
+        <p class="hint">Sends the drawn board to <code>POST /boards</code>. Optional, since operations save the board on their own. Identical boards always get the same ID.</p>
         <button type="button" class="btn btn-primary btn-block" id="upload">Upload board</button>
         <div class="msg" id="upload-msg" role="status" aria-live="polite" hidden></div>
         <form class="jump load" id="load-form" novalidate>

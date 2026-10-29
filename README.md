@@ -1,6 +1,6 @@
 # Game of Life API
 
-A REST API for Conway's Game of Life, written in C# on .NET 8. Upload a board, then ask for its next generation, the board N generations ahead, or the state it finally settles into. A small browser UI is included for drawing boards and watching the API work.
+A REST API for Conway's Game of Life, written in C# on .NET 8. Upload a board, then ask for its next generation, the board N generations ahead, or the state it finally settles into. A small browser UI is included for drawing boards and watching the API work. It shows a drawn board's ID as you draw, using the same hash as the server, and saves the board the first time an operation needs it.
 
 ## Running it
 
@@ -27,6 +27,7 @@ The tests cover the rule engine, cycle detection, every endpoint, validation, co
 | `GET` | `/boards/{id}/next` | The next generation, with its own ID. |
 | `GET` | `/boards/{id}/generations/{n}` | The board after `n` generations, with its own ID. |
 | `GET` | `/boards/{id}/final` | The state the board settles into, how many generations it took, and the cycle length. |
+| `GET` | `/settings` | The size and step limits, and the edge rule given to new uploads. |
 | `GET` | `/health` | `Healthy` when storage is reachable. |
 
 ```bash
@@ -35,7 +36,7 @@ curl -s localhost:5168/boards -H 'content-type: application/json' \
 ```
 
 ```json
-{ "id": "<64 hex characters>", "width": 5, "height": 5, "edgeMode": "dead", "cells": [[0,0,0,0,0], …] }
+{ "id": "1ccg4h2ptv9qxkxyg2zfhqejat", "width": 5, "height": 5, "edgeMode": "dead", "cells": [[0,0,0,0,0], …] }
 ```
 
 Errors use RFC 7807 problem details.
@@ -52,7 +53,9 @@ Errors use RFC 7807 problem details.
 
 ### A board's ID is its content
 
-The ID is a SHA-256 hash of the board's width, height, edge rule and cells. The same board always gets the same ID, so uploading it twice returns the same ID, and an ID always means exactly one board. Size and edge rule are part of the hash because the same live cells evolve differently on a board of another size or with different edges. The hashed text starts with a version tag, so a future change to the format can produce new IDs without clashing with old ones.
+The ID comes from a SHA-256 hash of the board's width, height, edge rule and cells. The same board always gets the same ID, so uploading it twice returns the same ID, and an ID always means exactly one board. Because the ID depends only on the board, a client can work it out without asking the server. The browser UI does this as you draw.
+
+The ID keeps the first 128 bits of the hash and writes them as 26 lowercase characters, using the same alphabet as a ULID. 128 bits is the usual minimum for unique IDs. At that size two boards will not share an ID by chance, and nobody can find two that do on purpose. The store also compares the full board whenever an ID already exists, so a clash would be refused rather than return the wrong board. Size and edge rule are part of the hash because the same live cells evolve differently on a board of another size or with different edges. The hashed text starts with a version tag, so a future change to the format can produce new IDs without clashing with old ones.
 
 Every board has exactly one next generation, so stored boards form a graph of next links that fills in as requests arrive. Results are saved when first computed.
 
