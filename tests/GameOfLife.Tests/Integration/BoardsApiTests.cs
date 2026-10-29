@@ -52,6 +52,18 @@ public sealed class BoardsApiTests : IDisposable
     }
 
     [Fact]
+    public async Task UploadReportsCellAndEdgeErrorsTogether()
+    {
+        var response = await _client.PostAsync(
+            "/boards",
+            new StringContent("""{"cells":[[2]],"edgeMode":"torus"}""", System.Text.Encoding.UTF8, "application/json"));
+        var problem = await Read<ValidationProblemDetails>(response);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(["Cells", "EdgeMode"], problem.Errors.Keys.Order());
+    }
+
+    [Fact]
     public async Task WrappedBoardsEvolveAcrossTheEdge()
     {
         // Three corner cells touch only through the wrapped edges, so the fourth corner is born and they form a block.
@@ -72,6 +84,7 @@ public sealed class BoardsApiTests : IDisposable
         { """{"cells":[null]}""", "cannot be null" },
         { $$"""{"cells":[[{{string.Join(",", Enumerable.Repeat(0, 257))}}]]}""", "maximum is 256" },
         { """{"cells":[[1]],"edgeMode":"torus"}""", "must be dead or wrap" },
+        { """{"cells":[[1]],"edgeMode":""}""", "must be dead or wrap" },
     };
 
     [Theory]

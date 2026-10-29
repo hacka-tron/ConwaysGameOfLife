@@ -771,7 +771,8 @@ function updateUI() {
   el.playLabel.textContent = state.playing ? 'Pause' : 'Play';
 
   const locked = state.showBusy && !state.playing;
-  el.load.disabled = !idle;
+  // Loading during Play is allowed. It stops playback first.
+  el.load.disabled = state.showBusy && !state.playing;
   for (const control of [el.clear, el.random, el.width, el.height, ...el.presets.children, ...el.edgeInputs]) {
     control.disabled = locked;
   }
