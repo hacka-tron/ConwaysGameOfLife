@@ -257,3 +257,11 @@ what does edges:dead mean
 ```
 
 The log's copy buttons got a standard copy icon and a normal pointer, the changing hint in the Operations panel was removed so the layout stays still, and the edge rule was explained.
+
+### 33
+
+```text
+how do i change the edge behavior?
+```
+
+Explained the server setting that picks dead or wrapped edges and how to change it.
