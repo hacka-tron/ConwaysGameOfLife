@@ -265,3 +265,31 @@ how do i change the edge behavior?
 ```
 
 Explained the server setting that picks dead or wrapped edges and how to change it.
+
+### 34
+
+```text
+cant we just make that one more factor in the board? like we should have a toggle for edge wrap vs dead mode in the app, and that in itself should generate a new board
+```
+
+```text
+*a new board id
+```
+
+Edge rule became a per board choice. Uploads can name it, the server setting became the default, and the browser UI got a toggle that changes the board and its ID.
+
+### 35
+
+```text
+also I want there to be a load board button
+```
+
+A Load button was added back next to the ID field. A complete ID still loads on its own.
+
+### 36
+
+```text
+default to dead if the user doesn't specificify
+```
+
+Uploads without an edge rule use dead edges, through the DefaultEdgeMode setting, and the browser toggle starts on dead.

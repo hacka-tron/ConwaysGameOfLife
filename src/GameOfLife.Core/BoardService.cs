@@ -17,9 +17,9 @@ public sealed class BoardService(
     private int MaxSteps => options.Value.MaxSteps;
 
     /// <returns>The board and whether it was new. Uploading an existing board returns the same ID.</returns>
-    public async Task<(Board Board, bool Created)> UploadAsync(bool[,] cells, CancellationToken cancellationToken)
+    public async Task<(Board Board, bool Created)> UploadAsync(bool[,] cells, EdgeMode edgeMode, CancellationToken cancellationToken)
     {
-        var board = Board.FromCells(cells, options.Value.EdgeMode);
+        var board = Board.FromCells(cells, edgeMode);
         bool created = await store.AddAsync(board, cancellationToken);
         return (board, created);
     }

@@ -5,6 +5,30 @@ namespace GameOfLife.Api;
 
 public static class BoardRequestValidator
 {
+    /// <summary>Reads the optional edge rule of an upload, falling back to the server default.</summary>
+    /// <returns><c>false</c> with an error added to <paramref name="errors"/> if the value is not a known rule.</returns>
+    public static bool TryParseEdgeMode(string? value, EdgeMode fallback, ModelStateDictionary errors, out EdgeMode edgeMode)
+    {
+        edgeMode = fallback;
+        if (value is null)
+        {
+            return true;
+        }
+
+        switch (value.Trim().ToLowerInvariant())
+        {
+            case "dead":
+                edgeMode = EdgeMode.Dead;
+                return true;
+            case "wrap":
+                edgeMode = EdgeMode.Wrap;
+                return true;
+            default:
+                errors.AddModelError(nameof(UploadBoardRequest.EdgeMode), "The edge mode must be dead or wrap.");
+                return false;
+        }
+    }
+
     /// <summary>Checks an uploaded grid against the configured limits and converts it to cells.</summary>
     /// <returns><c>false</c> with errors added to <paramref name="errors"/> if the grid is invalid.</returns>
     public static bool TryParse(int[][]? rows, GameOfLifeOptions limits, ModelStateDictionary errors, out bool[,] cells)

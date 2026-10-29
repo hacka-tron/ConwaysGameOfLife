@@ -27,13 +27,15 @@ The tests cover the rule engine, cycle detection, every endpoint, validation, co
 | `GET` | `/boards/{id}/next` | The next generation, with its own ID. |
 | `GET` | `/boards/{id}/generations/{n}` | The board after `n` generations, with its own ID. |
 | `GET` | `/boards/{id}/final` | The state the board settles into, how many generations it took, and the cycle length. |
-| `GET` | `/settings` | The size and step limits, and the edge rule given to new uploads. |
+| `GET` | `/settings` | The size and step limits, and the edge rule used when an upload does not name one. |
 | `GET` | `/health` | `Healthy` when storage is reachable. |
 
 ```bash
 curl -s localhost:5168/boards -H 'content-type: application/json' \
   -d '{"cells":[[0,0,0,0,0],[0,0,0,0,0],[0,1,1,1,0],[0,0,0,0,0],[0,0,0,0,0]]}'
 ```
+
+`edgeMode` is optional. `"dead"` treats cells beyond the border as dead and is the default. `"wrap"` joins opposite edges. The same cells with a different edge rule are a different board with a different ID.
 
 ```json
 { "id": "1ccg4h2ptv9qxkxyg2zfhqejat", "width": 5, "height": 5, "edgeMode": "dead", "cells": [[0,0,0,0,0], …] }
@@ -107,7 +109,7 @@ All limits live in `src/GameOfLife.Api/appsettings.json` and can be overridden w
 | `GameOfLife:MaxWidth` | 256 | Widest board accepted. |
 | `GameOfLife:MaxHeight` | 256 | Tallest board accepted. |
 | `GameOfLife:MaxSteps` | 10000 | Most generations computed for one request. |
-| `GameOfLife:EdgeMode` | `Dead` | `Dead` treats cells beyond the border as dead. `Wrap` joins opposite edges. Applies to new uploads. Stored boards keep their own rule. |
+| `GameOfLife:DefaultEdgeMode` | `Dead` | Edge rule for uploads that do not name one. `Dead` treats cells beyond the border as dead. `Wrap` joins opposite edges. |
 | `Storage:Path` | `data/boards` | Folder for the LMDB files. |
 | `Storage:MaxSizeBytes` | 1 GB | Most space the store may use. |
 | `Storage:CacheSizeLimitBytes` | 64 MB | Memory for the in-process cache. |

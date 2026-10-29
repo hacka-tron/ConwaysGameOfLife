@@ -20,9 +20,9 @@ public sealed class GameOfLifeOptions
     public int MaxSteps { get; set; } = 10_000;
 
     /// <summary>
-    /// Edge rule for newly uploaded boards. The rule is part of each board's identity,
+    /// Edge rule for uploads that do not name one. The rule is part of each board's identity,
     /// so boards already stored keep the rule they were uploaded with.
     /// </summary>
     [EnumDataType(typeof(EdgeMode))]
-    public EdgeMode EdgeMode { get; set; } = EdgeMode.Dead;
+    public EdgeMode DefaultEdgeMode { get; set; } = EdgeMode.Dead;
 }

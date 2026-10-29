@@ -37,6 +37,31 @@ public sealed class BoardsApiTests : IDisposable
         Assert.Equal($"/boards/{created.Id}", first.Headers.Location!.AbsolutePath);
     }
 
+    [Fact]
+    public async Task EdgeModeIsChosenPerUploadAndChangesTheId()
+    {
+        var dead = await UploadAsync(Patterns.Block);
+        var wrapResponse = await _client.PostAsJsonAsync("/boards", Upload(Patterns.Block) with { EdgeMode = "Wrap" });
+        wrapResponse.EnsureSuccessStatusCode();
+        var wrap = await Read<BoardResponse>(wrapResponse);
+
+        Assert.Equal("dead", dead.EdgeMode);
+        Assert.Equal("wrap", wrap.EdgeMode);
+        Assert.NotEqual(dead.Id, wrap.Id);
+        Assert.Equal(dead.Cells, wrap.Cells);
+    }
+
+    [Fact]
+    public async Task WrappedBoardsEvolveAcrossTheEdge()
+    {
+        // Three corner cells touch only through the wrapped edges, so the fourth corner is born and they form a block.
+        var response = await _client.PostAsJsonAsync("/boards", Upload(["#..#", "....", "....", "...#"]) with { EdgeMode = "wrap" });
+        var next = await _client.GetFromJsonAsync<BoardResponse>($"/boards/{(await Read<BoardResponse>(response)).Id}/next");
+
+        Assert.Equal("wrap", next!.EdgeMode);
+        Assert.Equal(Patterns.ToGrid(["#..#", "....", "....", "#..#"]), next.Cells);
+    }
+
     public static TheoryData<string, string> InvalidBoards => new()
     {
         { """{"cells":[]}""", "at least one row" },
@@ -46,6 +71,7 @@ public sealed class BoardsApiTests : IDisposable
         { """{"cells":[[0,2]]}""", "must be 0 or 1" },
         { """{"cells":[null]}""", "cannot be null" },
         { $$"""{"cells":[[{{string.Join(",", Enumerable.Repeat(0, 257))}}]]}""", "maximum is 256" },
+        { """{"cells":[[1]],"edgeMode":"torus"}""", "must be dead or wrap" },
     };
 
     [Theory]

@@ -38,7 +38,7 @@
           <div><dt>Size</dt><dd id="meta-size">40 × 28</dd></div>
           <div><dt>Alive</dt><dd id="meta-alive">0</dd></div>
           <div id="meta-gen-wrap" hidden><dt>Generation</dt><dd id="meta-gen">0</dd></div>
-          <div id="meta-edge-wrap" hidden><dt>Edges</dt><dd id="meta-edge">dead</dd></div>
+          <div id="meta-edge-wrap"><dt>Edges</dt><dd id="meta-edge">dead</dd></div>
         </dl>
       </div>
       <div class="stage" id="stage">
@@ -68,6 +68,13 @@
             <button type="button" class="btn" id="random">Random</button>
           </div>
         </div>
+        <div class="presets" role="radiogroup" aria-labelledby="edge-label">
+          <span class="presets-label" id="edge-label">Edges</span>
+          <div class="segmented" id="edge-modes">
+            <label title="Cells beyond the border always count as dead."><input type="radio" name="edge" value="dead" checked><span>Dead</span></label>
+            <label title="Opposite edges join, so a cell on the right edge neighbours the cell on the left edge."><input type="radio" name="edge" value="wrap"><span>Wrap around</span></label>
+          </div>
+        </div>
         <div class="presets" role="group" aria-label="Place a pattern near the center">
           <span class="presets-label">Patterns</span>
           <div class="preset-buttons" id="presets"></div>
@@ -82,8 +89,9 @@
             <span>Board ID</span>
             <input type="text" id="load-id" placeholder="Paste a board ID" autocomplete="off" spellcheck="false" aria-describedby="load-hint">
           </label>
+          <button type="submit" class="btn" id="load">Load board</button>
         </form>
-        <p class="hint" id="load-hint">The board loads as soon as a full ID is entered. Drawn boards are saved the first time you run an operation on them.</p>
+        <p class="hint" id="load-hint">A complete ID also loads on its own. Drawn boards are saved the first time you run an operation on them.</p>
         <div class="msg" id="load-msg" role="status" aria-live="polite" hidden></div>
       </section>
 

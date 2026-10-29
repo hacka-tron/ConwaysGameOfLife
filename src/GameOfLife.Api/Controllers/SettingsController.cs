@@ -10,14 +10,13 @@ namespace GameOfLife.Api.Controllers;
 public sealed class SettingsController(IOptions<GameOfLifeOptions> options) : ControllerBase
 {
     /// <summary>
-    /// Returns the server's limits and the edge rule for new uploads. A client needs the edge rule
-    /// to work out a board's ID before uploading it.
+    /// Returns the server's limits and the edge rule given to uploads that do not name one.
     /// </summary>
     [HttpGet]
     [ProducesResponseType<SettingsResponse>(StatusCodes.Status200OK)]
     public SettingsResponse Get()
     {
         var settings = options.Value;
-        return new SettingsResponse(settings.MaxWidth, settings.MaxHeight, settings.MaxSteps, settings.EdgeMode.ToKey());
+        return new SettingsResponse(settings.MaxWidth, settings.MaxHeight, settings.MaxSteps, settings.DefaultEdgeMode.ToKey());
     }
 }
