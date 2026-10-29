@@ -3,7 +3,6 @@
 
 const MAX_SIDE = 256;
 const LOG_LIMIT = 50;
-const HISTORY_LIMIT = 300;
 const MAX_CELL_PX = 40;
 const GRID_MIN_CELL_PX = 6;
 const RANDOM_DENSITY = 0.3;
@@ -117,10 +116,6 @@ const el = {
   finalSteps: $('final-steps'),
   finalPeriod: $('final-period'),
   finalFrom: $('final-from'),
-  history: $('history'),
-  historyEmpty: $('history-empty'),
-  historyClear: $('history-clear'),
-  historyMsg: $('history-msg'),
   logCount: $('log-count'),
   logBody: $('log-body'),
   logEmpty: $('log-empty'),
@@ -137,10 +132,6 @@ const state = {
   busy: false,
   playing: false,
   playTimer: 0,
-  history: [],
-  seq: 0,
-  lastSeen: new Map(),
-  currentSeq: null,
   logTotal: 0,
   // Edge rule the server gives new uploads, read from GET /settings. It is part of every board ID,
   // so drawn boards get no ID until it is known.
@@ -366,7 +357,7 @@ function boardEdited() {
   updateUI();
 }
 
-function setCurrent(board, { via, gen, seq }) {
+function setCurrent(board, { gen }) {
   state.width = board.width;
   state.height = board.height;
   state.cells = fromRows(board.cells, board.width, board.height);
@@ -383,11 +374,6 @@ function setCurrent(board, { via, gen, seq }) {
   state.idRequest++;
   checkServerId(board);
   syncSizeInputs();
-  if (via) {
-    addHistory(board.id, via, gen);
-  } else {
-    setCurrentHistory(seq ?? null);
-  }
   layoutCanvas();
   updateUI();
 }
@@ -748,7 +734,7 @@ function updateUI() {
       : 'Click or drag to toggle cells. Dragging paints the opposite of the first cell you touch.';
 
   el.opsHint.textContent = operable
-    ? 'Each result becomes the current board and is added to the history.'
+    ? 'Each result becomes the current board.'
     : 'The drawn board is saved automatically the first time you run an operation on it.';
 
   const idle = !state.busy;
@@ -767,8 +753,6 @@ function updateUI() {
   }
   el.canvas.classList.toggle('is-locked', locked);
 
-  el.historyClear.disabled = state.history.length === 0;
-  el.historyEmpty.hidden = state.history.length > 0;
 }
 
 // Runs one request-driven action with the controls locked and a spinner on its button.
@@ -800,7 +784,7 @@ async function saveBoard(target) {
     showProblem(target, badResponse(result.status));
     return null;
   }
-  setCurrent(result.data, { via: 'saved', gen: 0n });
+  setCurrent(result.data, { gen: 0n });
   return result;
 }
 
@@ -834,7 +818,7 @@ function loadById() {
     }
     if (!result.ok) return showProblem(el.loadMsg, result.problem);
     if (!isBoardResponse(result.data)) return showProblem(el.loadMsg, badResponse(result.status));
-    setCurrent(result.data, { via: 'load', gen: 0n });
+    setCurrent(result.data, { gen: 0n });
     showInfo(el.loadMsg, `Loaded board ${shortId(result.data.id)} from the server.`, 'success');
   });
 }
@@ -853,7 +837,7 @@ function nextGeneration() {
     if (!s) return;
     const result = await fetchNext();
     if (!result.ok) return showProblem(el.opsMsg, result.problem);
-    setCurrent(result.data, { via: 'next', gen: s.gen === null ? null : s.gen + 1n });
+    setCurrent(result.data, { gen: s.gen === null ? null : s.gen + 1n });
     if (result.data.id === s.id) {
       showInfo(el.opsMsg, 'The next generation is identical, so this board is a still life.');
     }
@@ -881,7 +865,7 @@ function jumpAhead() {
     const result = await api('GET', `/boards/${encodeURIComponent(s.id)}/generations/${n.toString()}`);
     if (!result.ok) return showProblem(el.opsMsg, result.problem);
     if (!isBoardResponse(result.data)) return showProblem(el.opsMsg, badResponse(result.status));
-    setCurrent(result.data, { via: `+${formatBig(n)}`, gen: s.gen === null ? null : s.gen + n });
+    setCurrent(result.data, { gen: s.gen === null ? null : s.gen + n });
   });
 }
 
@@ -903,7 +887,7 @@ function findFinal() {
     ) {
       return showProblem(el.opsMsg, badResponse(result.status));
     }
-    setCurrent(data.board, { via: 'final', gen: s.gen === null ? null : s.gen + BigInt(data.steps) });
+    setCurrent(data.board, { gen: s.gen === null ? null : s.gen + BigInt(data.steps) });
     showFinal(data, s.id);
   });
 }
@@ -991,7 +975,7 @@ async function playStep() {
     stopPlay('The next generation has the same ID as this one, so the board is a still life. Playback stopped.');
     return;
   }
-  setCurrent(result.data, { via: 'next', gen: s.gen === null ? null : s.gen + 1n });
+  setCurrent(result.data, { gen: s.gen === null ? null : s.gen + 1n });
   state.playTimer = setTimeout(playStep, currentDelay());
 }
 
@@ -1005,114 +989,6 @@ function updateSpeedLabel() {
 }
 
 el.speed.addEventListener('input', updateSpeedLabel);
-
-// ---------------------------------------------------------------- History
-
-const historyItems = new Map();
-
-function addHistory(id, via, gen) {
-  const seq = ++state.seq;
-  const previous = state.lastSeen.get(id) ?? null;
-  state.lastSeen.set(id, seq);
-  const entry = { seq, id, via, gen, repeatOf: previous };
-  state.history.push(entry);
-
-  const li = document.createElement('li');
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = 'history-item';
-  button.dataset.id = id;
-  button.title = id;
-
-  const seqEl = document.createElement('span');
-  seqEl.className = 'h-seq';
-  seqEl.textContent = `#${seq}`;
-
-  const main = document.createElement('span');
-  main.className = 'h-main';
-  const idEl = document.createElement('span');
-  idEl.className = 'h-id';
-  idEl.textContent = shortId(id);
-  const sub = document.createElement('span');
-  sub.className = 'h-sub';
-  const genText = gen === null ? 'gen unknown' : `gen ${formatBig(gen)}`;
-  if (previous !== null) {
-    const repeat = document.createElement('span');
-    repeat.className = 'h-repeat';
-    repeat.textContent = `Repeat of #${previous}`;
-    sub.append(repeat, ` (${seq - previous} back) · ${genText}`);
-    button.classList.add('is-repeat');
-  } else {
-    sub.textContent = genText.charAt(0).toUpperCase() + genText.slice(1);
-  }
-  main.append(idEl, sub);
-
-  const viaEl = document.createElement('span');
-  viaEl.className = 'h-via';
-  viaEl.textContent = via;
-
-  button.append(seqEl, main, viaEl);
-  button.setAttribute(
-    'aria-label',
-    `Board ${seq}, ${via}, ID ${shortId(id)}${previous !== null ? `, repeat of board ${previous}` : ''}`,
-  );
-  button.addEventListener('click', () => openHistory(entry));
-  button.addEventListener('mouseenter', () => highlightSame(id, true));
-  button.addEventListener('mouseleave', () => highlightSame(id, false));
-  button.addEventListener('focus', () => highlightSame(id, true));
-  button.addEventListener('blur', () => highlightSame(id, false));
-
-  li.append(button);
-  el.history.prepend(li);
-  historyItems.set(seq, button);
-
-  while (state.history.length > HISTORY_LIMIT) {
-    const dropped = state.history.shift();
-    historyItems.get(dropped.seq)?.parentElement?.remove();
-    historyItems.delete(dropped.seq);
-  }
-  setCurrentHistory(seq);
-}
-
-function setCurrentHistory(seq) {
-  if (state.currentSeq !== null) historyItems.get(state.currentSeq)?.classList.remove('is-current');
-  state.currentSeq = seq;
-  const button = seq === null ? null : historyItems.get(seq);
-  if (button) {
-    button.classList.add('is-current');
-    button.setAttribute('aria-current', 'true');
-  }
-  for (const [key, item] of historyItems) {
-    if (key !== seq) item.removeAttribute('aria-current');
-  }
-}
-
-function highlightSame(id, on) {
-  for (const item of el.history.querySelectorAll(`[data-id="${CSS.escape(id)}"]`)) item.classList.toggle('is-same', on);
-}
-
-function openHistory(entry) {
-  if (state.playing) stopPlay();
-  if (state.busy) return;
-  hideMsg(el.historyMsg);
-  return runBusy(historyItems.get(entry.seq), async () => {
-    const result = await api('GET', `/boards/${encodeURIComponent(entry.id)}`);
-    if (!result.ok) return showProblem(el.historyMsg, result.problem);
-    if (!isBoardResponse(result.data)) return showProblem(el.historyMsg, badResponse(result.status));
-    setCurrent(result.data, { via: null, gen: entry.gen, seq: entry.seq });
-    showInfo(el.historyMsg, `Loaded board #${entry.seq} again from the server.`);
-  });
-}
-
-el.historyClear.addEventListener('click', () => {
-  state.history = [];
-  state.lastSeen.clear();
-  historyItems.clear();
-  state.currentSeq = null;
-  el.history.replaceChildren();
-  hideMsg(el.historyMsg);
-  updateUI();
-});
 
 // ---------------------------------------------------------------- API log
 

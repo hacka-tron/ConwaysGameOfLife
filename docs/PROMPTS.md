@@ -219,3 +219,11 @@ so if we load a board not stored, then I want to generate that board in our db (
 ```
 
 An ID is a one-way hash, so a board cannot be rebuilt from an ID that was never stored. The UI now says so when an ID is not found, and IDs that encode the board itself were offered as an alternative.
+
+### 29
+
+```text
+also I think the api log and history is redundant, just keep the api log
+```
+
+The History panel was removed from the browser UI. The API log stays.
