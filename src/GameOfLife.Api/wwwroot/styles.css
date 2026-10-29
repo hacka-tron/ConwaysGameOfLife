@@ -102,7 +102,6 @@ input {
 
 .num,
 .board-meta dd,
-.history,
 .log-table {
   font-variant-numeric: tabular-nums;
 }
@@ -374,13 +373,6 @@ input {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--muted);
-}
-
-.card-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
 }
 
 .hint {
@@ -743,96 +735,6 @@ input {
   color: var(--muted);
 }
 
-/* History */
-
-.history {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  max-height: 320px;
-  margin: 0;
-  padding: 0;
-  overflow-y: auto;
-  list-style: none;
-}
-
-.history-item {
-  display: grid;
-  grid-template-columns: 2.6em minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 36px;
-  padding: 4px 8px;
-  border: 1px solid transparent;
-  border-left-width: 3px;
-  border-radius: var(--radius-small);
-  background: transparent;
-  font-size: 13px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.history-item:hover,
-.history-item.is-same {
-  background: var(--surface-2);
-}
-
-.history-item.is-same {
-  border-color: var(--border-strong);
-}
-
-.history-item.is-current {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
-
-.history-item.is-repeat {
-  border-left-color: var(--accent);
-}
-
-.h-seq {
-  color: var(--muted);
-}
-
-.h-main {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.h-id {
-  font-family: var(--mono);
-  font-size: 12.5px;
-}
-
-.h-sub {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.h-via {
-  padding: 1px 7px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  font-size: 12px;
-  color: var(--muted);
-  white-space: nowrap;
-}
-
-.h-repeat {
-  color: var(--accent);
-  font-weight: 600;
-}
-
-.empty {
-  color: var(--muted);
-  font-size: 13px;
-}
-
 /* API log */
 
 .api-log {
@@ -1009,10 +911,6 @@ input {
   .btn-small,
   .btn-chip {
     min-height: 40px;
-  }
-
-  .history-item {
-    min-height: 44px;
   }
 
   .log-table .l-time {
