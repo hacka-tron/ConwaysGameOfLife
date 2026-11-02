@@ -420,3 +420,11 @@ so realistically if I wanted to save every possible board in the 256 x256 layout
 ```
 
 The assistant showed it is impossible. There are about 10 to the power 19,728 possible boards, and even the settled boards alone number more than 10 to the power 1,233, so convergence cannot bring the count anywhere near storable. Precomputing whole boards only works up to about 5 x 5. The overlap can be used locally instead, by caching the future of small regions as Hashlife does.
+
+### 52
+
+```text
+so how do we stream long lines of boards? is it a http request each time, or do we have some long lived connection that we use to get this data?
+```
+
+The assistant confirmed there is no streaming. Every generation is its own HTTP request, and the browser reuses one kept-alive TCP connection for them. It compared Server-Sent Events, WebSockets and batching as ways to stream long runs.
