@@ -45,13 +45,6 @@
     <section class="stage-panel" aria-label="Board">
       <div class="stage" id="stage">
         <canvas id="board" role="img" aria-label="Game of Life board. Click or drag to toggle cells."></canvas>
-        <button type="button" class="btn-play" id="play" disabled aria-pressed="false">
-          <span class="play-orb" aria-hidden="true">
-            <svg class="icon icon-play" viewBox="0 0 16 16"><path d="M4 2.5v11l9-5.5z"/></svg>
-            <svg class="icon icon-pause" viewBox="0 0 16 16"><path d="M4 2.5h3v11H4zM9 2.5h3v11H9z"/></svg>
-          </span>
-          <span id="play-label">Play</span>
-        </button>
       </div>
       <div class="board-bar">
         <div class="board-identity">
@@ -84,10 +77,19 @@
           </label>
           <button type="submit" class="btn" id="jump" disabled>Jump ahead</button>
         </form>
-        <label class="field speed">
-          <span>Speed, <output id="speed-out" class="num">4 per second</output></span>
-          <input type="range" id="speed" min="0" max="5" step="1" value="2">
-        </label>
+        <div class="play">
+          <button type="button" class="btn-play" id="play" disabled aria-pressed="false">
+            <span class="play-orb" aria-hidden="true">
+              <svg class="icon icon-play" viewBox="0 0 16 16"><path d="M4 2.5v11l9-5.5z"/></svg>
+              <svg class="icon icon-pause" viewBox="0 0 16 16"><path d="M4 2.5h3v11H4zM9 2.5h3v11H9z"/></svg>
+            </span>
+            <span id="play-label">Play</span>
+          </button>
+          <label class="field field-grow speed">
+            <span>Speed, <output id="speed-out" class="num">4 per second</output></span>
+            <input type="range" id="speed" min="0" max="5" step="1" value="2">
+          </label>
+        </div>
         <div class="msg" id="ops-msg" role="status" aria-live="polite" hidden></div>
       </section>
 

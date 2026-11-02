@@ -524,46 +524,17 @@ function cellFor(width, height) {
   return fit >= 2 ? Math.min(MAX_CELL_PX, Math.floor(fit)) : Math.max(fit, 0.25);
 }
 
-// Space the play button takes in the stage's bottom left corner, measured from the content box.
-function playRoom() {
-  const styles = getComputedStyle(el.stage);
-  const gap = 8;
-  return {
-    width: el.play.offsetLeft - parseFloat(styles.paddingLeft) + el.play.offsetWidth + gap,
-    height: el.stage.clientHeight - parseFloat(styles.paddingBottom) - el.play.offsetTop + gap,
-  };
-}
-
-// On wide screens the board uses the whole stage, and the play button floats over its bottom left
-// corner. A centered board usually leaves room for the button beside or below it. When it would not,
-// the board moves up or right just far enough to clear it, whichever keeps the cells larger. On
-// phones the stage reserves a strip for the button in styles.css instead.
 function layoutCanvas() {
   const avail = availableSize();
-  let cell = cellFor(avail.width, avail.height);
-  let dodge = '';
-  if (WIDE_QUERY.matches) {
-    const room = playRoom();
-    const clear =
-      (avail.width - state.width * cell) / 2 >= room.width || (avail.height - state.height * cell) / 2 >= room.height;
-    if (!clear) {
-      const up = cellFor(avail.width, avail.height - room.height);
-      const right = cellFor(avail.width - room.width, avail.height);
-      dodge = up >= right ? 'up' : 'right';
-      cell = Math.max(up, right);
-    }
-  }
-  el.stage.dataset.dodge = dodge;
-  view.cell = cell;
+  view.cell = cellFor(avail.width, avail.height);
   draw();
 }
 
 // Sizes the first board to the stage, so a wide screen gets a wide board instead of empty margins.
 function fitStartSize() {
   const avail = availableSize();
-  const room = WIDE_QUERY.matches ? playRoom() : { width: 0, height: 0 };
   const side = (px) => Math.min(MAX_SIDE, Math.max(MIN_START_SIDE, Math.floor(px / START_CELL_PX)));
-  resize(side(avail.width), side(avail.height - room.height));
+  resize(side(avail.width), side(avail.height));
 }
 
 // Star radius and glow blur as shares of the cell. Newborns are the largest and brightest.
