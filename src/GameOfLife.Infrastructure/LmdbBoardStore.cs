@@ -63,20 +63,42 @@ public sealed class LmdbBoardStore : IBoardStore, IDisposable
         return Task.FromResult<BoardRecord?>(new BoardRecord(DecodeBoard(boardValue!), nextId, final));
     }
 
+    public Task<IReadOnlyList<Board>> GetChainAsync(string fromId, int maxLength, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var chain = new List<Board>();
+        using var transaction = _environment.BeginTransaction(TransactionBeginFlags.ReadOnly);
+        string id = fromId;
+        while (chain.Count < maxLength
+            && transaction.TryGet(_database, Key("next", id), out byte[]? nextValue)
+            && transaction.TryGet(_database, Key("board", id = Encoding.ASCII.GetString(nextValue!)), out byte[]? boardValue))
+        {
+            chain.Add(DecodeBoard(boardValue!));
+        }
+
+        return Task.FromResult<IReadOnlyList<Board>>(chain);
+    }
+
     public Task<bool> AddAsync(Board board, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         return Task.FromResult(Write(transaction => PutBoard(transaction, board)));
     }
 
-    public Task SaveNextAsync(string fromId, Board next, CancellationToken cancellationToken)
+    public Task SaveChainAsync(string fromId, IReadOnlyList<Board> chain, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         Write(transaction =>
         {
-            // The board is written before the link to it, in the same commit.
-            PutBoard(transaction, next);
-            Put(transaction, Key("next", fromId), Encoding.ASCII.GetBytes(next.Id));
+            // Each board is written before the link to it, all in one commit.
+            string previous = fromId;
+            foreach (var board in chain)
+            {
+                PutBoard(transaction, board);
+                Put(transaction, Key("next", previous), Encoding.ASCII.GetBytes(board.Id));
+                previous = board.Id;
+            }
+
             return true;
         });
         return Task.CompletedTask;

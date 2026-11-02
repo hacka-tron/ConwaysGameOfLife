@@ -17,6 +17,12 @@ public sealed class SettingsController(IOptions<GameOfLifeOptions> options) : Co
     public SettingsResponse Get()
     {
         var settings = options.Value;
-        return new SettingsResponse(settings.MaxWidth, settings.MaxHeight, settings.MaxSteps, settings.DefaultEdgeMode.ToKey());
+        return new SettingsResponse(
+            settings.MaxWidth,
+            settings.MaxHeight,
+            settings.MaxSteps,
+            settings.DefaultEdgeMode.ToKey(),
+            settings.MaxBoardsPerSecond,
+            settings.MaxBatchSize);
     }
 }

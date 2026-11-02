@@ -21,12 +21,21 @@ public interface IBoardStore
 {
     Task<BoardRecord?> GetAsync(string id, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Follows saved next links from <paramref name="fromId"/> and returns up to <paramref name="maxLength"/>
+    /// boards, in one read. It stops early at the first board with no saved next link.
+    /// </summary>
+    Task<IReadOnlyList<Board>> GetChainAsync(string fromId, int maxLength, CancellationToken cancellationToken);
+
     /// <summary>Stores the board unless it already exists.</summary>
     /// <returns><c>true</c> if the board was new.</returns>
     Task<bool> AddAsync(Board board, CancellationToken cancellationToken);
 
-    /// <summary>Stores <paramref name="next"/> and records it as the successor of <paramref name="fromId"/>, atomically.</summary>
-    Task SaveNextAsync(string fromId, Board next, CancellationToken cancellationToken);
+    /// <summary>
+    /// Stores consecutive generations and the next links between them, atomically. <paramref name="chain"/>
+    /// starts with the generation after <paramref name="fromId"/>, and each board is the next of the one before.
+    /// </summary>
+    Task SaveChainAsync(string fromId, IReadOnlyList<Board> chain, CancellationToken cancellationToken);
 
     /// <summary>
     /// The final state saved for <paramref name="id"/>, or <c>null</c> if none is known. This works for

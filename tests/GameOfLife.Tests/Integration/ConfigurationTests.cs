@@ -95,7 +95,7 @@ public sealed class ConfigurationTests : IDisposable
 
         var settings = await factory.CreateClient().GetFromJsonAsync<SettingsResponse>("/settings");
 
-        Assert.Equal(new SettingsResponse(64, 256, 500, "wrap"), settings);
+        Assert.Equal(new SettingsResponse(64, 256, 500, "wrap", 30, 120), settings);
     }
 
     [Fact]
