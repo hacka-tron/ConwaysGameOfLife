@@ -524,3 +524,12 @@ also you should record an extinction final state for boards that dissapear, righ
 ```
 
 A board whose cells all die now reports the final state kind extinct instead of still life, in the API and in the browser UI. Next and Play also say that every cell has died when an empty board stops changing.
+
+### 65
+
+```text
+on the server side, can't we just save the hashes of the different boards, and only
+  compute the boards when we need to
+```
+
+The assistant explained that a hash cannot be turned back into a board, so each saved ID would need a recipe, meaning a stored ancestor board and how many generations to step from it. Uploads would be stored in full and every other board as a recipe, with a full checkpoint every 100 or so generations to cap the replay. That cuts storage about 60 times at 256 x 256, in exchange for up to about 100 ms of recomputing when a board is read.
