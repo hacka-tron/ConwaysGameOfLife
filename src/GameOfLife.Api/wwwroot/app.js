@@ -134,7 +134,6 @@ const el = {
   speedOut: $('speed-out'),
   opsMsg: $('ops-msg'),
   finalCard: $('final-card'),
-  finalCanvas: $('final-canvas'),
   finalKind: $('final-kind'),
   finalSummary: $('final-summary'),
   finalSteps: $('final-steps'),
@@ -475,7 +474,7 @@ function syncLife() {
   }
 }
 
-// 0 newborn, 1 young, 2 settled, 3 ancient. Boards with no ages, like the final state thumbnail, are settled.
+// 0 newborn, 1 young, 2 settled, 3 ancient. A cell with no age counts as settled.
 function ageBand(age) {
   if (!age) return 2;
   if (age < AGE_YOUNG) return 0;
@@ -528,8 +527,8 @@ function layoutCanvas() {
 const STAR_RADIUS = [0.4, 0.34, 0.32, 0.36];
 const STAR_GLOW = [1.2, 0.8, 0.6, 0.7];
 
-// Paints a board as a starfield. ages and trails come from life for the main board and are null for
-// thumbnails. withGrid adds a faint dust dot in each empty cell once cells are large enough.
+// Paints a board as a starfield. ages and trails come from life, and without them every star is
+// settled. withGrid adds a faint dust dot in each empty cell once cells are large enough.
 function paint(canvas, width, height, cells, cell, withGrid, ages = null, trails = null) {
   const dpr = window.devicePixelRatio || 1;
   const cssW = width * cell;
@@ -756,11 +755,18 @@ function localEdit(action) {
   boardEdited();
 }
 
-el.clear.addEventListener('click', () => localEdit(() => state.cells.fill(0)));
+// Clear, Random and patterns replace the whole board, so every star on it starts as a newborn.
+el.clear.addEventListener('click', () =>
+  localEdit(() => {
+    state.cells.fill(0);
+    resetLife(state.width, state.height);
+  }),
+);
 
 el.random.addEventListener('click', () =>
   localEdit(() => {
     for (let i = 0; i < state.cells.length; i++) state.cells[i] = Math.random() < RANDOM_DENSITY ? 1 : 0;
+    resetLife(state.width, state.height);
   }),
 );
 
@@ -790,6 +796,7 @@ function placePreset(preset) {
         if (preset.rows[y][x] === 'O') state.cells[index(ox + x, oy + y)] = 1;
       }
     }
+    resetLife(state.width, state.height);
   });
 }
 
@@ -878,7 +885,7 @@ function updateUI() {
     el.boardId.classList.remove('is-stored');
   } else {
     el.stateBadge.dataset.kind = 'stored';
-    el.stateBadge.textContent = 'Stored';
+    el.stateBadge.textContent = 'Catalogued';
     el.boardId.textContent = shortId(s.id);
     el.boardId.title = s.id;
     el.boardId.classList.add('is-stored');
@@ -1077,12 +1084,6 @@ function findFinal() {
   });
 }
 
-// Fits the final board thumbnail into roughly 300 by 180 pixels.
-function finalCellSize(board) {
-  const fit = Math.min(300 / board.width, 180 / board.height);
-  return fit >= 2 ? Math.min(12, Math.floor(fit)) : Math.max(0.5, fit);
-}
-
 // The Final state panel describes one Find final state result, so anything that changes the board hides it.
 function hideFinal() {
   el.finalCard.hidden = true;
@@ -1156,11 +1157,7 @@ function showFinal(data, fromId) {
   el.finalPeriod.textContent = formatBig(data.period);
   el.finalFrom.textContent = shortId(fromId);
   el.finalFrom.title = fromId;
-
-  const b = data.board;
-  const cell = finalCellSize(b);
-  paint(el.finalCanvas, b.width, b.height, fromRows(b.cells, b.width, b.height), cell, false);
-  el.finalCanvas.setAttribute('aria-label', `Final board, ${b.width} by ${b.height}`);
+  // No picture here. The board itself already shows the final state.
   el.finalCard.hidden = false;
 }
 
