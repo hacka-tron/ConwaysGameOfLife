@@ -541,3 +541,11 @@ cant we make a 2 way hash?
 ```
 
 The assistant explained that a two-way hash is really an encoding of the board, so it must be at least as long as the board's information. That is up to 65,536 bits, or about 13,000 characters, for a 256 x 256 board, which is too long for a URL. Compression makes sparse boards short, but random boards stay large. A hybrid could use the compressed board as the ID when it is short and a hash otherwise, at the cost of two ID formats.
+
+### 67
+
+```text
+ok i really like the recipe idea, could we use this so that we only store key boards, and otherwise store recipes in the middle? that way we can save intermediate steps, and be able to load new calls from recipes rather than recomputing ourselves, and thus save on memory and storage
+```
+
+The assistant laid out a design with full key boards for uploads, final boards and a checkpoint every K generations, recipes for every other board including the intermediate steps of jumps and final state runs, and skip links between checkpoints for fast jumps. It pointed out that loading a recipe still recomputes up to K generations, so recipes cap the recomputing rather than removing it, and asked the owner to choose the scope before building.
