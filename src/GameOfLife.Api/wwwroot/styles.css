@@ -1,67 +1,47 @@
 /*
- * Design tokens. Every color lives here so light and dark mode stay in one place.
- * app.js reads the --cell-* tokens to paint the canvas, so change them here, not in JS.
+ * Design tokens for the Observatory theme. Every color lives here.
+ * app.js reads the --cell-* and --star-* tokens to paint the canvas, so change them here, not in JS.
+ * The theme is dark by design, so there is one set of tokens for every color scheme.
  */
 :root {
-  --bg: #f4f5f7;
-  --surface: #ffffff;
-  --surface-2: #f0f2f5;
-  --border: #dadde3;
-  --border-strong: #c3c8d0;
-  --text: #1a1d23;
-  --muted: #5d6573;
-  --accent: #2557d6;
-  --accent-hover: #1d47b3;
-  --accent-text: #ffffff;
-  --accent-soft: rgba(37, 87, 214, 0.1);
-  --accent-ring: rgba(37, 87, 214, 0.45);
-  --ok: #18794e;
-  --warn: #9a5b00;
-  --danger: #c4282d;
-  --danger-soft: rgba(196, 40, 45, 0.08);
+  --bg: #05070f;
+  --surface: #0b1020;
+  --surface-2: #111830;
+  --border: #1a2238;
+  --border-strong: #2b3550;
+  --text: #e8ecf8;
+  --muted: #9aa6c4;
+  --accent: #ffd27a;
+  --accent-hover: #ffe0a0;
+  --accent-text: #1a1406;
+  --accent-soft: rgba(255, 210, 122, 0.12);
+  --accent-ring: rgba(255, 210, 122, 0.5);
+  --info: #9cc4ff;
+  --info-soft: rgba(156, 196, 255, 0.12);
+  --ok: #7dffb2;
+  --warn: #ffb36b;
+  --danger: #ff7a7a;
+  --danger-soft: rgba(255, 122, 122, 0.1);
 
-  --cell-alive: #2557d6;
-  --cell-dead: #ffffff;
-  --cell-grid: #e3e6eb;
-  --stage-bg: #e9ecf0;
+  /* Canvas. Live cells are stars that change color as they age, and dead cells are faint dust. */
+  --cell-dead: #070b18;
+  --cell-grid: rgba(120, 140, 200, 0.16);
+  --star-new: #ffffff;
+  --star-young: #9cc4ff;
+  --star-settled: #ffd27a;
+  --star-ancient: #ff8f5e;
+  --star-trail: 120, 150, 255;
+  --stage-bg: #070b18;
+  --canvas-bg: rgba(7, 11, 24, 0.55);
 
-  --radius: 8px;
-  --radius-small: 6px;
-  --shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
-  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --topbar-h: 60px;
+  --radius: 16px;
+  --radius-small: 10px;
+  --shadow: none;
+  --mono: "Space Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --sans: "Space Grotesk", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  --topbar-h: 72px;
 
-  color-scheme: light;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0e1014;
-    --surface: #161920;
-    --surface-2: #1d2129;
-    --border: #2a2f39;
-    --border-strong: #3a404c;
-    --text: #e5e8ec;
-    --muted: #98a1ae;
-    --accent: #6b93ff;
-    --accent-hover: #87a7ff;
-    --accent-text: #0b1020;
-    --accent-soft: rgba(107, 147, 255, 0.14);
-    --accent-ring: rgba(107, 147, 255, 0.55);
-    --ok: #3fbf7f;
-    --warn: #e0a84a;
-    --danger: #ff6b6b;
-    --danger-soft: rgba(255, 107, 107, 0.1);
-
-    --cell-alive: #6b93ff;
-    --cell-dead: #12151b;
-    --cell-grid: #222731;
-    --stage-bg: #0b0d11;
-
-    --shadow: none;
-    color-scheme: dark;
-  }
+  color-scheme: dark;
 }
 
 *,
@@ -123,8 +103,8 @@ input {
   justify-content: space-between;
   gap: 12px;
   min-height: var(--topbar-h);
-  padding: 10px 16px;
-  background: var(--surface);
+  padding: 12px 24px;
+  background: var(--bg);
   border-bottom: 1px solid var(--border);
 }
 
@@ -136,16 +116,42 @@ input {
 }
 
 .brand-mark {
-  width: 26px;
-  height: 26px;
+  width: 38px;
+  height: 38px;
   flex-shrink: 0;
-  fill: var(--accent);
+}
+
+.brand-mark .orbit {
+  fill: none;
+  stroke: var(--border-strong);
+  stroke-width: 1.5;
+}
+
+.brand-mark .star-new {
+  fill: var(--star-new);
+}
+
+.brand-mark .star-settled {
+  fill: var(--star-settled);
+}
+
+.brand-mark .star-young {
+  fill: var(--star-young);
+}
+
+.kicker {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 
 .brand h1 {
-  font-size: 17px;
-  font-weight: 650;
+  font-size: 20px;
+  font-weight: 700;
   letter-spacing: -0.01em;
+  line-height: 1.2;
 }
 
 .tagline {
@@ -162,7 +168,7 @@ input {
   padding: 4px 12px;
   border: 1px solid var(--border);
   border-radius: 999px;
-  background: var(--surface);
+  background: transparent;
   font-size: 13px;
   color: var(--muted);
   cursor: pointer;
@@ -181,6 +187,7 @@ input {
 
 .health[data-state="ok"] .health-dot {
   background: var(--ok);
+  box-shadow: 0 0 8px var(--ok);
 }
 
 .health[data-state="down"] .health-dot {
@@ -262,14 +269,16 @@ input {
   flex-shrink: 0;
   padding: 2px 8px;
   border-radius: 999px;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
   border: 1px solid transparent;
 }
 
 .badge[data-kind="stored"] {
-  background: var(--accent-soft);
+  border-color: var(--accent);
   color: var(--accent);
 }
 
@@ -286,23 +295,33 @@ input {
 .board-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 16px;
+  gap: 4px 28px;
   margin: 0;
-  font-size: 13px;
 }
 
 .board-meta div {
   display: flex;
-  gap: 6px;
+  flex-direction: column;
 }
 
 .board-meta dt {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
   color: var(--muted);
 }
 
 .board-meta dd {
   margin: 0;
-  font-weight: 550;
+  font-family: var(--mono);
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.board-meta #meta-alive {
+  color: var(--accent);
 }
 
 .stage {
@@ -312,7 +331,11 @@ input {
   flex: 1;
   min-height: 0;
   padding: 16px;
-  background: var(--stage-bg);
+  background-color: var(--stage-bg);
+  /* Two faint nebulae behind the board, one cool and one warm. */
+  background-image:
+    radial-gradient(circle at 20% 30%, rgba(80, 110, 200, 0.18), transparent 45%),
+    radial-gradient(circle at 80% 75%, rgba(255, 150, 90, 0.1), transparent 40%);
   overflow: hidden;
 }
 
@@ -320,6 +343,8 @@ input {
   display: block;
   touch-action: none;
   cursor: crosshair;
+  /* See-through, so the nebulae show between the stars while the board edge stays visible. */
+  background: var(--canvas-bg);
   box-shadow: 0 0 0 1px var(--border);
 }
 
@@ -339,6 +364,51 @@ input {
 
 .board-foot.is-edited #draft-note {
   color: var(--warn);
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.legend-dot[data-age="new"] {
+  background: var(--star-new);
+  box-shadow: 0 0 6px var(--star-young);
+}
+
+.legend-dot[data-age="young"] {
+  background: var(--star-young);
+}
+
+.legend-dot[data-age="settled"] {
+  background: var(--star-settled);
+}
+
+.legend-dot[data-age="ancient"] {
+  background: var(--star-ancient);
+}
+
+.board-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
 }
 
 .coords {
@@ -368,11 +438,9 @@ input {
 }
 
 .card h2 {
-  font-size: 13px;
-  font-weight: 650;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--muted);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
 }
 
 .hint {
@@ -423,8 +491,9 @@ input {
   padding: 0 10px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-small);
-  background: var(--surface);
-  font-size: 15px;
+  background: var(--bg);
+  font-family: var(--mono);
+  font-size: 14px;
   font-variant-numeric: tabular-nums;
   color: var(--text);
 }
@@ -490,16 +559,17 @@ input {
 .segmented span {
   display: block;
   padding: 7px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-small);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--muted);
   font-size: 13px;
   text-align: center;
   cursor: pointer;
 }
 
 .segmented input:checked + span {
-  border-color: var(--accent);
-  background: var(--accent-soft);
+  border-color: var(--info);
+  background: var(--info-soft);
   color: var(--text);
 }
 
@@ -524,9 +594,9 @@ input {
   padding: 0 12px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-small);
-  background: var(--surface);
+  background: transparent;
   font-size: 14px;
-  font-weight: 550;
+  font-weight: 600;
   line-height: 1.2;
   cursor: pointer;
   white-space: nowrap;
@@ -545,6 +615,7 @@ input {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-text);
+  font-weight: 700;
 }
 
 .btn-primary:hover:not(:disabled) {
@@ -573,8 +644,9 @@ input {
 }
 
 .btn-chip {
-  min-height: 30px;
-  padding: 0 10px;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
   font-size: 13px;
   font-weight: 500;
 }
@@ -736,7 +808,6 @@ input {
 
 .final-canvas {
   display: block;
-  box-shadow: 0 0 0 1px var(--border);
   background: var(--cell-dead);
 }
 
@@ -748,8 +819,8 @@ input {
 }
 
 .final-kind {
-  font-size: 16px;
-  font-weight: 650;
+  font-size: 20px;
+  font-weight: 600;
 }
 
 .final-summary {
@@ -775,8 +846,9 @@ input {
 
 .final-stats dd {
   margin: 0;
+  font-family: var(--mono);
   font-size: 18px;
-  font-weight: 650;
+  font-weight: 700;
 }
 
 .final-from {
