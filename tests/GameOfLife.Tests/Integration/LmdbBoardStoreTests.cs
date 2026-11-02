@@ -1,4 +1,6 @@
 using System.Text;
+using GameOfLife.Core;
+using GameOfLife.Core.Storage;
 using GameOfLife.Infrastructure;
 using GameOfLife.Tests.Unit;
 using LightningDB;
@@ -18,7 +20,7 @@ public sealed class LmdbBoardStoreTests : IDisposable
         var board = BoardCodecTests.Make("glider-256");
         WriteRaw($"board:{board.Id}", BoardCodecTests.RawFormat(board));
 
-        using var store = new LmdbBoardStore(Options.Create(new StorageOptions { Path = _storage.Path }));
+        using var store = new LmdbBoardStore(Options.Create(new StorageOptions { Path = _storage.Path }), new LifeEngine(), BoardStoragePolicy.Default);
         bool created = await store.AddAsync(board, CancellationToken.None);
         var loaded = await store.GetAsync(board.Id, CancellationToken.None);
 
@@ -34,7 +36,7 @@ public sealed class LmdbBoardStoreTests : IDisposable
         var other = BoardCodecTests.Make("single-1x1");
         WriteRaw($"board:{board.Id}", BoardCodecTests.RawFormat(other));
 
-        using var store = new LmdbBoardStore(Options.Create(new StorageOptions { Path = _storage.Path }));
+        using var store = new LmdbBoardStore(Options.Create(new StorageOptions { Path = _storage.Path }), new LifeEngine(), BoardStoragePolicy.Default);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => store.AddAsync(board, CancellationToken.None));
     }

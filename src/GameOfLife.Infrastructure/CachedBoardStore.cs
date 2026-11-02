@@ -37,19 +37,22 @@ public sealed class CachedBoardStore(IBoardStore inner, long sizeLimitBytes) : I
 
     // One read of the inner store beats a cache lookup per board, and playback chains would push
     // more useful records out of the cache.
-    public Task<IReadOnlyList<Board>> GetChainAsync(string fromId, int maxLength, CancellationToken cancellationToken) =>
+    public Task<IReadOnlyList<StoredBoard>> GetChainAsync(string fromId, int maxLength, CancellationToken cancellationToken) =>
         inner.GetChainAsync(fromId, maxLength, cancellationToken);
+
+    public Task<ChainWalk> WalkAsync(string fromId, int maxLength, CancellationToken cancellationToken) =>
+        inner.WalkAsync(fromId, maxLength, cancellationToken);
 
     public Task<bool> AddAsync(Board board, CancellationToken cancellationToken) =>
         inner.AddAsync(board, cancellationToken);
 
-    public async Task SaveChainAsync(string fromId, IReadOnlyList<Board> chain, CancellationToken cancellationToken)
+    public async Task SaveChainAsync(string fromId, IReadOnlyList<ChainLink> links, CancellationToken cancellationToken)
     {
-        await inner.SaveChainAsync(fromId, chain, cancellationToken);
+        await inner.SaveChainAsync(fromId, links, cancellationToken);
         _cache.Remove(fromId);
-        foreach (var board in chain)
+        foreach (var link in links)
         {
-            _cache.Remove(board.Id);
+            _cache.Remove(link.BoardId);
         }
     }
 

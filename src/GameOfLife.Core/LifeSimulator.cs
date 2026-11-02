@@ -69,9 +69,11 @@ public sealed class LifeSimulator(ILifeEngine engine)
     /// After that, any later generation is found by arithmetic on the cycle instead of by stepping.
     /// Without a target, it runs until the final state is known.
     /// </summary>
+    /// <param name="onStep">Called with every generation computed by stepping, in order, so the caller can save them.</param>
     /// <returns>The result, or <c>null</c> if neither happened within <paramref name="maxSteps"/> generations.</returns>
     public async Task<SimulationResult?> RunAsync(
-        Board start, long? target, int maxSteps, FinalStateLookup? knownFinal, CancellationToken cancellationToken)
+        Board start, long? target, int maxSteps, FinalStateLookup? knownFinal, CancellationToken cancellationToken,
+        Action<Board>? onStep = null)
     {
         ArgumentNullException.ThrowIfNull(start);
         if (target < 0)
@@ -94,7 +96,7 @@ public sealed class LifeSimulator(ILifeEngine engine)
             if (knownFinal is not null && await knownFinal(current.Id, cancellationToken) is { } known)
             {
                 var final = known with { Steps = checked(generation + known.Steps) };
-                return ContinueFromKnown(current, generation, final, ids, target, maxSteps, cancellationToken);
+                return ContinueFromKnown(current, generation, final, ids, target, maxSteps, onStep, cancellationToken);
             }
 
             firstSeenAt.Add(current.Id, generation);
@@ -108,6 +110,7 @@ public sealed class LifeSimulator(ILifeEngine engine)
             cancellationToken.ThrowIfCancellationRequested();
             current = engine.Step(current);
             generation++;
+            onStep?.Invoke(current);
 
             if (firstSeenAt.TryGetValue(current.Id, out int cycleStart))
             {
@@ -133,7 +136,7 @@ public sealed class LifeSimulator(ILifeEngine engine)
     // `final` is the starting board's final state, worked out from it.
     private SimulationResult? ContinueFromKnown(
         Board current, int generation, FinalState final, List<string> ids, long? target, int maxSteps,
-        CancellationToken cancellationToken)
+        Action<Board>? onStep, CancellationToken cancellationToken)
     {
         if (target is not long t)
         {
@@ -157,6 +160,7 @@ public sealed class LifeSimulator(ILifeEngine engine)
 
             cancellationToken.ThrowIfCancellationRequested();
             current = engine.Step(current);
+            onStep?.Invoke(current);
         }
 
         return new SimulationResult(current, final, ids);

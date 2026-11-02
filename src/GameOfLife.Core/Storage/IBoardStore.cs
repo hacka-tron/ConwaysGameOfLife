@@ -6,16 +6,24 @@ public sealed record StoredFinalState(string BoardId, int Steps, int Period);
 /// <summary>A stored board plus whatever has been learned about its future so far.</summary>
 /// <param name="NextId">ID of the next generation, once it has been computed.</param>
 /// <param name="Final">Final state, once it has been computed.</param>
-public sealed record BoardRecord(Board Board, string? NextId, StoredFinalState? Final);
+/// <param name="StepsFromKey">0 when the board is stored in full, otherwise the generations its recipe replays.</param>
+public sealed record BoardRecord(Board Board, string? NextId, StoredFinalState? Final, int StepsFromKey = 0);
 
 /// <summary>
 /// Durable key-value storage of boards and their links. Every board whose ID is returned to a
 /// client must be stored, because an ID cannot be turned back into a board.
 /// </summary>
 /// <remarks>
-/// Every value is fully determined by its key, so writing the same key twice always writes the
-/// same value. That keeps concurrent requests safe without locking and lets implementations
-/// replicate or cache freely. The methods are asynchronous so a networked store can implement them.
+/// <para>
+/// Boards are stored in one of two ways, chosen by <see cref="BoardStoragePolicy"/>. Small boards are
+/// stored in full. Large boards are stored in full only at key boards, and every other large board is a
+/// recipe that rebuilds it from a key board. Reads return the rebuilt board either way.
+/// </para>
+/// <para>
+/// Every value is fully determined by its key, except that a large board can have more than one valid
+/// recipe. Every recipe for an ID rebuilds the same board, so concurrent writers stay safe without locking.
+/// The methods are asynchronous so a networked store can implement them.
+/// </para>
 /// </remarks>
 public interface IBoardStore
 {
@@ -25,17 +33,25 @@ public interface IBoardStore
     /// Follows saved next links from <paramref name="fromId"/> and returns up to <paramref name="maxLength"/>
     /// boards, in one read. It stops early at the first board with no saved next link.
     /// </summary>
-    Task<IReadOnlyList<Board>> GetChainAsync(string fromId, int maxLength, CancellationToken cancellationToken);
+    Task<IReadOnlyList<StoredBoard>> GetChainAsync(string fromId, int maxLength, CancellationToken cancellationToken);
 
-    /// <summary>Stores the board unless it already exists.</summary>
+    /// <summary>
+    /// Follows saved next links from <paramref name="fromId"/> for up to <paramref name="maxLength"/> generations,
+    /// in one read, returning only IDs. It stops early at the end of the saved links or when they loop back.
+    /// </summary>
+    Task<ChainWalk> WalkAsync(string fromId, int maxLength, CancellationToken cancellationToken);
+
+    /// <summary>Stores the board in full unless it is already stored in either form.</summary>
     /// <returns><c>true</c> if the board was new.</returns>
     Task<bool> AddAsync(Board board, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Stores consecutive generations and the next links between them, atomically. <paramref name="chain"/>
-    /// starts with the generation after <paramref name="fromId"/>, and each board is the next of the one before.
+    /// Stores consecutive generations and the next links between them, atomically. <paramref name="links"/>
+    /// starts with the generation after <paramref name="fromId"/>, and each is the next of the one before.
+    /// A link with a board is stored in full, and a link without one is stored as a recipe from the most
+    /// recent board stored in full.
     /// </summary>
-    Task SaveChainAsync(string fromId, IReadOnlyList<Board> chain, CancellationToken cancellationToken);
+    Task SaveChainAsync(string fromId, IReadOnlyList<ChainLink> links, CancellationToken cancellationToken);
 
     /// <summary>
     /// The final state saved for <paramref name="id"/>, or <c>null</c> if none is known. This works for

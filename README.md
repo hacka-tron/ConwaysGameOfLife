@@ -60,6 +60,7 @@ Errors use RFC 7807 problem details.
 - **Each result is computed once.** A board's next generation and final state are stored when first computed, and later requests are lookups. Finding one board's final state also saves the final state of every board it passed through, and a later run stops as soon as it reaches any of them.
 - **Cycles are detected and skipped.** Final state is found when a board's ID repeats. For an oscillator it is the cycle member with the smallest ID, with the steps to reach it and the period. Generation N on a cycling board is found by arithmetic, so huge N is instant.
 - **Storage is durable.** LMDB, an embedded key-value store, commits every write to disk before the response, so data survives restarts and crashes.
+- **Small boards are stored in full and large boards as recipes.** A board of up to 8,192 cells is stored whole. Larger boards keep their full cells only every 64 generations, and every board in between is a recipe that replays from a key board at most 63 generations back, in about 15 ms at most. Every generation a request computes is saved, so later requests load or walk it instead of computing it again. 1 GB holds about 1.25 million 32 x 48 boards or about 1.6 million 256 x 256 boards.
 - **Boards are compressed.** Stored boards are Brotli-compressed when that makes them smaller, and responses are compressed with Brotli or gzip for clients that accept it. A batch of 90 boards at 256 x 256 travels as about 1 MB instead of about 12 MB.
 - **Playback is batched and rate limited.** The browser UI plays boards from a buffer filled by `sequence` batches, sized to the chosen speed and the measured round trip. Each client may receive at most `MaxBoardsPerSecond` boards per second through playback, which is also the UI's top speed.
 - **Limits are enforced.** Board size, step limit, storage size and request size are configurable and validated at startup. Boards that do not settle within the step limit return 422.
@@ -80,6 +81,8 @@ Set in `src/GameOfLife.Api/appsettings.json`, or per run with environment variab
 | `GameOfLife:DefaultEdgeMode` | `Dead` | Edge rule for uploads that do not name one. `Dead` treats cells beyond the border as dead. `Wrap` joins opposite edges. |
 | `Storage:Path` | `data/boards` | Folder for the LMDB files. |
 | `Storage:MaxSizeBytes` | 1 GB | Most space the store may use. |
+| `Storage:FullBoardMaxBytes` | 1024 | Boards whose packed cells fit in this many bytes are stored in full. Larger boards are stored as recipes. |
+| `Storage:KeyBoardInterval` | 64 | For recipe boards, the most generations between boards stored in full. |
 | `Storage:CacheSizeLimitBytes` | 64 MB | Memory for the in-process cache. |
 | `Kestrel:Limits:MaxRequestBodySize` | 1 MB | Largest request body. A full 256 x 256 board is about 130 KB. |
 

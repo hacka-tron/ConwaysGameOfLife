@@ -57,15 +57,58 @@ public sealed class ConfigurationTests : IDisposable
         var glider = await (await client.PostAsJsonAsync("/boards", Upload(Patterns.GliderOn(20))))
             .Content.ReadFromJsonAsync<BoardResponse>();
 
-        var final = await client.GetAsync($"/boards/{glider!.Id}/final");
-        var farAhead = await client.GetAsync($"/boards/{glider.Id}/generations/6");
+        var farAhead = await client.GetAsync($"/boards/{glider!.Id}/generations/11");
+        var final = await client.GetAsync($"/boards/{glider.Id}/final");
         var withinLimit = await client.GetAsync($"/boards/{glider.Id}/generations/5");
 
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, farAhead.StatusCode);
         Assert.Equal(HttpStatusCode.UnprocessableEntity, final.StatusCode);
         var problem = await final.Content.ReadFromJsonAsync<ProblemDetails>();
         Assert.Contains("within 5 generations", problem!.Detail);
-        Assert.Equal(HttpStatusCode.UnprocessableEntity, farAhead.StatusCode);
         Assert.Equal(HttpStatusCode.OK, withinLimit.StatusCode);
+    }
+
+    [Theory]
+    [InlineData(30)]
+    [InlineData(50)]
+    public async Task SavedProgressNeverChangesWhetherAJumpSucceeds(int generations)
+    {
+        // A glider on a wrapped 16 x 16 board repeats every 64 generations, which is past the limit of 20.
+        using var factory = new ApiFactory(_storage.Path, new Dictionary<string, string>
+        {
+            ["GameOfLife:MaxSteps"] = "20",
+        });
+        var client = factory.CreateClient();
+        var glider = await (await client.PostAsJsonAsync("/boards", Upload(Patterns.GliderOn(16)) with { EdgeMode = "wrap" }))
+            .Content.ReadFromJsonAsync<BoardResponse>();
+
+        // Each failed request saves the generations it computed. Asking again must still fail.
+        var statuses = new List<HttpStatusCode>();
+        for (int i = 0; i < 4; i++)
+        {
+            statuses.Add((await client.GetAsync($"/boards/{glider!.Id}/generations/{generations}")).StatusCode);
+        }
+
+        Assert.All(statuses, status => Assert.Equal(HttpStatusCode.UnprocessableEntity, status));
+    }
+
+    [Fact]
+    public async Task ARunThatHitsTheStepLimitStillSavesItsBoards()
+    {
+        using var factory = new ApiFactory(_storage.Path, new Dictionary<string, string>
+        {
+            ["GameOfLife:MaxSteps"] = "5",
+        });
+        var client = factory.CreateClient();
+        var glider = await (await client.PostAsJsonAsync("/boards", Upload(Patterns.GliderOn(20))))
+            .Content.ReadFromJsonAsync<BoardResponse>();
+
+        var failed = await client.GetAsync($"/boards/{glider!.Id}/generations/8");
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, failed.StatusCode);
+        var simulator = new GameOfLife.Core.LifeSimulator(new GameOfLife.Core.LifeEngine());
+        var fifth = simulator.Advance(Patterns.Parse(Patterns.GliderOn(20)), 5, CancellationToken.None);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"/boards/{fifth.Id}")).StatusCode);
     }
 
     [Fact]
