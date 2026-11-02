@@ -508,3 +508,11 @@ ok so a few more questions, if we kept the board size at 64 x 64, and let people
 ```
 
 The assistant explained that every possible 64 x 64 board still cannot be stored, since there are about 10 to the power 1,233 of them. Every board people actually reach fits in memory easily, at about 512 bytes each, so a million boards is about half a gigabyte. LMDB is memory-mapped, so the boards in use are already served from RAM. Running smaller boards inside a fixed 64 x 64 board would also change their results, because patterns could grow past the smaller edge.
+
+### 63
+
+```text
+so essentially at any board size, there are enough permutations of unique boards that it would be impossible to save all of them, even with hashlife or some other algorithm?
+```
+
+The assistant confirmed this for any board bigger than about 6 x 6, since the count doubles with every added cell. Hashlife never stores every board. It only remembers the patterns that actually occur, and the only table it fills completely is the 65,536 cases of a 4 x 4 patch. Symmetry trims the count by a small factor at most, so the practical approach is to compute on demand and remember the answers.
