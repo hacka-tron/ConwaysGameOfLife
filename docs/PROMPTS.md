@@ -655,3 +655,11 @@ Also the architecture is too heavy to read, cut out the fluff and focus on the m
 ```
 
 The architecture document was cut from about 3,900 words to about 1,300. It now leads with the six decisions that stand out, content-hash IDs, never computing twice, full and recipe storage with measured capacity, durable embedded storage, batched rate-limited playback and a UI that checks the server, followed by short sections on scaling, known limits and code layout.
+
+### 81
+
+```text
+ok did you push this yet? if not please do
+```
+
+The assistant pushed main to GitHub, including the architecture rewrite and the browser UI restyle from another session.
