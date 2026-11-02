@@ -7,7 +7,8 @@ namespace GameOfLife.Api.Controllers;
 [ApiController]
 [Route("boards")]
 [Produces("application/json")]
-public sealed class BoardsController(BoardService boards, IOptions<GameOfLifeOptions> options) : ControllerBase
+public sealed class BoardsController(BoardService boards, PlaybackRateLimiter playbackLimit, IOptions<GameOfLifeOptions> options)
+    : ControllerBase
 {
     /// <summary>Stores a board and returns its ID. Uploading the same board again returns the same ID.</summary>
     /// <response code="201">The board is new.</response>
@@ -39,11 +40,43 @@ public sealed class BoardsController(BoardService boards, IOptions<GameOfLifeOpt
         BoardResponse.From(await boards.GetAsync(id, cancellationToken));
 
     /// <summary>Returns the next generation of a board, with its own ID.</summary>
+    /// <response code="429">The client asked for more boards per second than the playback limit allows.</response>
     [HttpGet("{id}/next")]
     [ProducesResponseType<BoardResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
-    public async Task<BoardResponse> Next(string id, CancellationToken cancellationToken) =>
-        BoardResponse.From(await boards.GetNextAsync(id, cancellationToken));
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status429TooManyRequests)]
+    public async Task<BoardResponse> Next(string id, CancellationToken cancellationToken)
+    {
+        playbackLimit.Acquire(HttpContext, 1);
+        return BoardResponse.From(await boards.GetNextAsync(id, cancellationToken));
+    }
+
+    /// <summary>Returns up to <c>count</c> consecutive generations after a board, for playback.</summary>
+    /// <remarks>
+    /// The batch ends early once the sequence repeats, and <c>repeatsFrom</c> says where it loops back to.
+    /// Each board counts towards the per-client playback limit.
+    /// </remarks>
+    /// <param name="id">The board to start from.</param>
+    /// <param name="count">How many generations to return, from 1 to the server's MaxBatchSize.</param>
+    /// <param name="cancellationToken">Cancelled when the client disconnects.</param>
+    /// <response code="429">The client asked for more boards per second than the playback limit allows.</response>
+    [HttpGet("{id}/sequence")]
+    [ProducesResponseType<BoardSequenceResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status429TooManyRequests)]
+    public async Task<ActionResult<BoardSequenceResponse>> Sequence(string id, [FromQuery] int count, CancellationToken cancellationToken)
+    {
+        int maxBatchSize = options.Value.MaxBatchSize;
+        if (count < 1 || count > maxBatchSize)
+        {
+            ModelState.AddModelError(nameof(count), $"Count must be between 1 and {maxBatchSize}.");
+            return ValidationProblem(ModelState);
+        }
+
+        playbackLimit.Acquire(HttpContext, count);
+        return BoardSequenceResponse.From(await boards.GetSequenceAsync(id, count, cancellationToken));
+    }
 
     /// <summary>Returns the board after the given number of generations, with its own ID.</summary>
     /// <remarks>

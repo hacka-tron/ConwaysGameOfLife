@@ -444,3 +444,27 @@ ok so would you make th refill at variable based on the speed the user is genera
 ```
 
 The assistant recommended a variable refill point measured in time rather than boards. The client keeps about two round trips of playback buffered and sizes each batch to cover a few seconds, recalculating whenever the speed or the measured round trip changes.
+
+### 55
+
+```text
+ok well cap as the UI caps how many board a person should see per second, so we should keep that in mind with the server, we can possibly add some rate limits for that. check whaat the gui caps at and build the batching formula with that in mind
+```
+
+The assistant found the UI's top speed was 20 boards a second, with an uncapped "As fast as possible" option, and that the UI never read the server's settings. It added a sequence endpoint that returns a batch of generations, a server setting for the most boards a client may receive per second, a per-client rate limit counted in boards, and a playback buffer in the UI whose refill point and batch size follow the chosen speed and the measured round trip.
+
+### 56
+
+```text
+also can we make sure the read and right transactions are batched on the server side to make these operations more efficient
+```
+
+Every generation a sequence request computes is saved in one write transaction, and saved next links are now read in one read transaction instead of one per generation.
+
+### 57
+
+```text
+also can you start the app locally so I can mess with it
+```
+
+The assistant started the API and browser UI locally for hands-on testing.

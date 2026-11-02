@@ -42,6 +42,13 @@ public sealed class BoardExceptionHandler(IProblemDetailsService problemDetails)
                 Title = e.StatusCode == StatusCodes.Status413PayloadTooLarge ? "Request too large" : "Bad request",
                 Detail = e.Message,
             },
+            PlaybackRateLimitedException e => new ProblemDetails
+            {
+                Status = StatusCodes.Status429TooManyRequests,
+                Title = "Too many boards requested",
+                Detail = $"Playback is limited to {e.MaxBoardsPerSecond} boards per second per client. Try again in {e.RetryAfterSeconds} seconds.",
+                Extensions = { ["retryAfterSeconds"] = e.RetryAfterSeconds },
+            },
             StorageFullException => new ProblemDetails
             {
                 Status = StatusCodes.Status507InsufficientStorage,
@@ -57,6 +64,11 @@ public sealed class BoardExceptionHandler(IProblemDetailsService problemDetails)
         }
 
         context.Response.StatusCode = problem.Status!.Value;
+        if (exception is PlaybackRateLimitedException limited)
+        {
+            context.Response.Headers.RetryAfter = limited.RetryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
         return await problemDetails.TryWriteAsync(new ProblemDetailsContext
         {
             HttpContext = context,

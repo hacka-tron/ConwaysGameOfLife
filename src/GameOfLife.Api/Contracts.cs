@@ -39,6 +39,18 @@ public sealed record BoardResponse(string Id, int Width, int Height, string Edge
     }
 }
 
+/// <param name="Boards">Consecutive generations. The first is the generation after the requested board.</param>
+/// <param name="RepeatsFrom">
+/// Set when the sequence repeats. The generation after the last board is this one, counting the requested
+/// board as 0, so a client can loop the boards it has with no more requests. A still life returns no boards
+/// and 0.
+/// </param>
+public sealed record BoardSequenceResponse(BoardResponse[] Boards, int? RepeatsFrom)
+{
+    public static BoardSequenceResponse From(BoardSequence sequence) =>
+        new(sequence.Boards.Select(BoardResponse.From).ToArray(), sequence.RepeatsFrom);
+}
+
 /// <param name="Board">The settled board. For an oscillator, the cycle member with the smallest ID.</param>
 /// <param name="Steps">Generations from the requested board until it first reaches <paramref name="Board"/>.</param>
 /// <param name="Period">1 if the board no longer changes, otherwise the length of the cycle it repeats.</param>
@@ -56,4 +68,7 @@ public sealed record FinalStateResponse(BoardResponse Board, int Steps, int Peri
 /// <param name="MaxHeight">Tallest board accepted.</param>
 /// <param name="MaxSteps">Most generations computed for one request.</param>
 /// <param name="DefaultEdgeMode">Edge rule given to uploads that do not name one. It is part of each board's ID.</param>
-public sealed record SettingsResponse(int MaxWidth, int MaxHeight, int MaxSteps, string DefaultEdgeMode);
+/// <param name="MaxBoardsPerSecond">Most boards one client may receive per second through next and sequence.</param>
+/// <param name="MaxBatchSize">Most boards one sequence request returns.</param>
+public sealed record SettingsResponse(
+    int MaxWidth, int MaxHeight, int MaxSteps, string DefaultEdgeMode, int MaxBoardsPerSecond, int MaxBatchSize);

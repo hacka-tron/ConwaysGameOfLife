@@ -26,9 +26,10 @@ With Homebrew's `dotnet@8` on macOS, add `/opt/homebrew/opt/dotnet@8/bin` to `PA
 | `POST` | `/boards` | The stored board with its ID. `201` if new, `200` if this exact board was already stored. |
 | `GET` | `/boards/{id}` | The stored board. |
 | `GET` | `/boards/{id}/next` | The next generation, with its own ID. |
+| `GET` | `/boards/{id}/sequence?count={n}` | Up to `n` consecutive generations for playback, and where the sequence loops back to once it repeats. |
 | `GET` | `/boards/{id}/generations/{n}` | The board after `n` generations, with its own ID. |
 | `GET` | `/boards/{id}/final` | The state the board settles into, how many generations it took, and the cycle length. |
-| `GET` | `/settings` | The size and step limits, and the edge rule used when an upload does not name one. |
+| `GET` | `/settings` | The size, step and playback limits, and the edge rule used when an upload does not name one. |
 | `GET` | `/health` | `Healthy` when storage is reachable. |
 
 ```bash
@@ -50,6 +51,7 @@ Errors use RFC 7807 problem details.
 | `404` | No board has that ID. |
 | `413` | The request body is larger than the configured limit. |
 | `422` | The board did not settle within the configured step limit. |
+| `429` | The client asked for boards through `next` or `sequence` faster than the playback limit. The `Retry-After` header says when to try again. |
 | `507` | Storage has reached its configured maximum size. |
 
 ## Design
@@ -58,6 +60,7 @@ Errors use RFC 7807 problem details.
 - **Each result is computed once.** A board's next generation and final state are stored when first computed, and later requests are lookups. Finding one board's final state also saves the final state of every board it passed through, and a later run stops as soon as it reaches any of them.
 - **Cycles are detected and skipped.** Final state is found when a board's ID repeats. For an oscillator it is the cycle member with the smallest ID, with the steps to reach it and the period. Generation N on a cycling board is found by arithmetic, so huge N is instant.
 - **Storage is durable.** LMDB, an embedded key-value store, commits every write to disk before the response, so data survives restarts and crashes.
+- **Playback is batched and rate limited.** The browser UI plays boards from a buffer filled by `sequence` batches, sized to the chosen speed and the measured round trip. Each client may receive at most `MaxBoardsPerSecond` boards per second through playback, which is also the UI's top speed.
 - **Limits are enforced.** Board size, step limit, storage size and request size are configurable and validated at startup. Boards that do not settle within the step limit return 422.
 
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) covers the design in depth, including storage choices, scaling and known limits.
@@ -71,6 +74,8 @@ Set in `src/GameOfLife.Api/appsettings.json`, or per run with environment variab
 | `GameOfLife:MaxWidth` | 256 | Widest board accepted. |
 | `GameOfLife:MaxHeight` | 256 | Tallest board accepted. |
 | `GameOfLife:MaxSteps` | 10000 | Most generations computed for one request. |
+| `GameOfLife:MaxBoardsPerSecond` | 30 | Most boards one client receives per second through `next` and `sequence`. Also the browser UI's top speed. |
+| `GameOfLife:MaxBatchSize` | 120 | Most boards one `sequence` request returns. Clients may burst up to twice this before the playback limit applies. |
 | `GameOfLife:DefaultEdgeMode` | `Dead` | Edge rule for uploads that do not name one. `Dead` treats cells beyond the border as dead. `Wrap` joins opposite edges. |
 | `Storage:Path` | `data/boards` | Folder for the LMDB files. |
 | `Storage:MaxSizeBytes` | 1 GB | Most space the store may use. |

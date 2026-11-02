@@ -4,6 +4,13 @@ using Microsoft.Extensions.Options;
 
 namespace GameOfLife.Core;
 
+/// <param name="Boards">Consecutive generations, where <c>Boards[i]</c> is generation <c>i + 1</c> after the requested board.</param>
+/// <param name="RepeatsFrom">
+/// When the sequence repeats, the generation that follows the last board, counted from the requested board
+/// as generation 0. A still life repeats from its own generation, so playback can loop with no more requests.
+/// </param>
+public sealed record BoardSequence(IReadOnlyList<Board> Boards, int? RepeatsFrom);
+
 /// <summary>
 /// The four operations of the API. Results are stored as they are computed, so asking
 /// the same question about the same board twice only computes the answer once.
@@ -36,8 +43,66 @@ public sealed class BoardService(
         }
 
         var next = simulator.Advance(record.Board, 1, cancellationToken);
-        await store.SaveNextAsync(id, next, cancellationToken);
+        await store.SaveChainAsync(id, [next], cancellationToken);
         return next;
+    }
+
+    /// <summary>
+    /// Returns up to <paramref name="count"/> consecutive generations after the board, for playback.
+    /// Saved next links are read in one read and the rest are computed, then saved in one write.
+    /// The batch ends early when a generation repeats one already in it, or the starting board.
+    /// </summary>
+    public async Task<BoardSequence> GetSequenceAsync(string id, int count, CancellationToken cancellationToken)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
+        var record = await GetRecordAsync(id, cancellationToken);
+        var saved = await store.GetChainAsync(id, count, cancellationToken);
+        var generationOf = new Dictionary<string, int> { [id] = 0 };
+        var boards = new List<Board>(count);
+        var computed = new List<Board>();
+        string computedFrom = id;
+        Board current = record.Board;
+
+        for (int generation = 1; generation <= count; generation++)
+        {
+            Board next;
+            if (generation <= saved.Count)
+            {
+                next = saved[generation - 1];
+            }
+            else
+            {
+                // The saved chain ended here, so everything from this board onwards is computed.
+                if (computed.Count == 0)
+                {
+                    computedFrom = current.Id;
+                }
+
+                next = simulator.Advance(current, 1, cancellationToken);
+                computed.Add(next);
+            }
+
+            if (generationOf.TryGetValue(next.Id, out int repeatsFrom))
+            {
+                await SaveComputedAsync();
+                return new BoardSequence(boards, repeatsFrom);
+            }
+
+            generationOf.Add(next.Id, generation);
+            boards.Add(next);
+            current = next;
+        }
+
+        await SaveComputedAsync();
+        return new BoardSequence(boards, null);
+
+        async Task SaveComputedAsync()
+        {
+            if (computed.Count > 0)
+            {
+                await store.SaveChainAsync(computedFrom, computed, cancellationToken);
+            }
+        }
     }
 
     public async Task<Board> GetGenerationAsync(string id, long generations, CancellationToken cancellationToken)

@@ -18,6 +18,7 @@ builder.Services.AddOptions<GameOfLifeOptions>()
 builder.Services.AddSingleton<ILifeEngine, LifeEngine>();
 builder.Services.AddSingleton<LifeSimulator>();
 builder.Services.AddScoped<BoardService>();
+builder.Services.AddSingleton<PlaybackRateLimiter>();
 builder.Services.AddBoardStorage(builder.Configuration);
 
 builder.Services.AddControllers();

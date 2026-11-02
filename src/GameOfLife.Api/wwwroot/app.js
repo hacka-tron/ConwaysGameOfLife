@@ -12,14 +12,23 @@ const RANDOM_DENSITY = 0.3;
 const WIDE_QUERY = window.matchMedia('(min-width: 900px)');
 const DARK_QUERY = window.matchMedia('(prefers-color-scheme: dark)');
 
-const SPEEDS = [
-  { delay: 1000, label: '1 per second' },
-  { delay: 500, label: '2 per second' },
-  { delay: 250, label: '4 per second' },
-  { delay: 100, label: '10 per second' },
-  { delay: 50, label: '20 per second' },
-  { delay: 0, label: 'As fast as possible' },
-];
+// Play speeds in boards per second. The server's MaxBoardsPerSecond is always the top speed, and
+// slower speeds above it are dropped, so the UI never asks for more than the server allows.
+const BASE_SPEEDS = [1, 2, 4, 10, 20];
+const DEFAULT_SPEED = 4;
+
+// Playback buffering. Play asks for boards in batches with GET /boards/{id}/sequence and keeps the ones
+// it has not shown yet in a buffer. The refill point and the batch size are set in time, then turned
+// into boards at the chosen speed, so playback never waits on the network at any speed:
+//   refill when buffered boards <= speed x BUFFER_ROUND_TRIPS x round trip
+//   batch size = speed x BATCH_SECONDS, between MIN_BATCH and the server's MaxBatchSize
+// The round trip is the slowest of the last few batches, so one slow answer raises the refill point.
+const BUFFER_ROUND_TRIPS = 2;
+const BATCH_SECONDS = 3;
+const MIN_BATCH = 10;
+const MIN_REFILL_AT = 2;
+const DEFAULT_ROUND_TRIP_MS = 300;
+const ROUND_TRIP_SAMPLES = 5;
 
 // Patterns use O for a live cell and . for a dead one.
 const PRESETS = [
@@ -67,6 +76,7 @@ const FALLBACK_PROBLEMS = {
   400: { title: 'Request rejected', detail: 'The server did not accept this request.' },
   404: { title: 'Not found', detail: 'The server has no board with this ID.' },
   413: { title: 'Board too large', detail: 'The request body is larger than the server accepts.' },
+  429: { title: 'Too many boards requested', detail: 'The server limits how many boards each client receives per second.' },
   422: { title: 'Board did not settle', detail: 'The board did not reach a still life or a repeating cycle within the server step limit.' },
   500: { title: 'Server error', detail: 'The server failed while handling the request.' },
   507: { title: 'Storage is full', detail: 'The server has no room left to store boards.' },
@@ -136,6 +146,12 @@ const state = {
   busyTimer: 0,
   playing: false,
   playTimer: 0,
+  // Buffered boards for Play. Replaced on every Play and dropped by stopPlay, so answers that arrive
+  // after the board changed are ignored.
+  playback: null,
+  // From GET /settings. These defaults match the server's and apply until it answers.
+  limits: { maxBoardsPerSecond: 30, maxBatchSize: 120 },
+  speeds: [],
   // The board stepping started from, with its generation and its final state once fetched. Next, Jump
   // and Play share it until the board is edited or another board is loaded, and the Final state panel
   // appears once stepping reaches the final state.
@@ -214,7 +230,8 @@ function toProblem(response, data) {
   const title = typeof body.title === 'string' && body.title.trim() ? body.title : fallback.title;
   let detail = typeof body.detail === 'string' && body.detail.trim() ? body.detail : '';
   if (!detail && messages.length === 0) detail = fallback.detail;
-  return { status: response.status, title, detail, errors: messages.length ? messages : null };
+  const retryAfterSeconds = Number.isInteger(body.retryAfterSeconds) ? body.retryAfterSeconds : null;
+  return { status: response.status, title, detail, errors: messages.length ? messages : null, retryAfterSeconds };
 }
 
 function badResponse(status) {
@@ -1004,8 +1021,46 @@ function showFinal(data, fromId) {
 
 // ---------------------------------------------------------------- Play
 
+function currentRate() {
+  return state.speeds[Number(el.speed.value)] ?? DEFAULT_SPEED;
+}
+
 function currentDelay() {
-  return SPEEDS[Number(el.speed.value)]?.delay ?? 250;
+  return 1000 / currentRate();
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+// How few buffered boards trigger the next batch request.
+function refillAt(rate, roundTripMs) {
+  return clamp(Math.ceil((rate * BUFFER_ROUND_TRIPS * roundTripMs) / 1000), MIN_REFILL_AT, state.limits.maxBatchSize);
+}
+
+// How many boards to ask for in one batch.
+function batchSize(rate) {
+  const max = state.limits.maxBatchSize;
+  return clamp(Math.ceil(rate * BATCH_SECONDS), Math.min(MIN_BATCH, max), max);
+}
+
+function roundTripMs(playback) {
+  return playback.roundTrips.length ? Math.max(...playback.roundTrips) : DEFAULT_ROUND_TRIP_MS;
+}
+
+function isSequenceResponse(data) {
+  return (
+    data &&
+    Array.isArray(data.boards) &&
+    data.boards.every(isBoardResponse) &&
+    (data.repeatsFrom === null || (Number.isInteger(data.repeatsFrom) && data.repeatsFrom >= 0 && data.repeatsFrom <= data.boards.length))
+  );
+}
+
+// The stored board in the shape the API returns, so it can start a loop like any fetched board.
+function storedAsResponse() {
+  const s = state.stored;
+  return { id: s.id, width: s.width, height: s.height, edgeMode: s.edgeMode, cells: toRows() };
 }
 
 async function startPlay() {
@@ -1019,38 +1074,83 @@ async function startPlay() {
   }
   state.playing = true;
   state.busy = true;
+  // cursor is the last board fetched, which the next batch starts from. loop holds the boards to
+  // repeat once the server says the sequence repeats, after which no more requests are needed.
+  state.playback = { queue: [], cursor: storedAsResponse(), fetching: false, roundTrips: [], loop: null, error: null, retryAt: 0 };
   updateUI();
   startRun();
-  playStep();
+  fillBuffer();
+  state.playTimer = setTimeout(playStep, currentDelay());
 }
 
 function stopPlay(message) {
   if (!state.playing) return;
   state.playing = false;
   state.busy = false;
+  state.playback = null;
   clearTimeout(state.playTimer);
   state.playTimer = 0;
   if (message) showInfo(el.opsMsg, message);
   updateUI();
 }
 
-async function playStep() {
-  if (!state.playing) return;
-  const s = state.stored;
-  const result = await fetchNext();
+// Asks for the next batch once the buffer is down to the refill point. One request at a time, each
+// starting from the last board fetched, so batches arrive in order with no gaps.
+async function fillBuffer() {
+  const pb = state.playback;
+  if (!pb || pb.fetching || pb.loop || performance.now() < pb.retryAt) return;
+  const rate = currentRate();
+  if (pb.queue.length > refillAt(rate, roundTripMs(pb))) return;
+
+  pb.fetching = true;
+  const from = pb.cursor;
+  const started = performance.now();
+  const result = await api('GET', `/boards/${encodeURIComponent(from.id)}/sequence?count=${batchSize(rate)}`);
   // Paused, edited or replaced while the request was in flight. Drop the result.
-  if (!state.playing || state.stored !== s) return;
-  if (!result.ok) {
+  if (state.playback !== pb) return;
+  pb.fetching = false;
+  pb.roundTrips.push(performance.now() - started);
+  if (pb.roundTrips.length > ROUND_TRIP_SAMPLES) pb.roundTrips.shift();
+
+  if (!result.ok || !isSequenceResponse(result.data)) {
+    // Playback carries on from the buffer and tries again later. It only stops if the buffer runs out.
+    pb.error = result.ok ? badResponse(result.status) : result.problem;
+    pb.retryAt = performance.now() + 1000 * (pb.error.retryAfterSeconds ?? 1);
+    return;
+  }
+  pb.error = null;
+  const { boards, repeatsFrom } = result.data;
+  pb.queue.push(...boards);
+  if (boards.length) pb.cursor = boards[boards.length - 1];
+  // After the last board comes generation repeatsFrom of this batch, where 0 is the board it started from.
+  if (repeatsFrom !== null) pb.loop = [from, ...boards].slice(repeatsFrom);
+}
+
+function nextBuffered(pb) {
+  if (pb.queue.length === 0 && pb.loop) pb.queue.push(...pb.loop);
+  return pb.queue.shift();
+}
+
+function playStep() {
+  const pb = state.playback;
+  if (!state.playing || !pb) return;
+  const s = state.stored;
+  const next = nextBuffered(pb);
+  if (next) {
+    if (next.id === s.id) {
+      stopPlay('The next generation has the same ID as this one, so the board is a still life. Playback stopped.');
+      return;
+    }
+    setCurrent(next, { gen: s.gen === null ? null : s.gen + 1n });
+    showFinalIfReached();
+  } else if (pb.error && !pb.fetching && pb.error.status !== 429) {
+    // The buffer ran out and the last batch failed. A rate limit answer just waits for its retry time.
+    const problem = pb.error;
     stopPlay();
-    showProblem(el.opsMsg, result.problem);
+    showProblem(el.opsMsg, problem);
     return;
   }
-  if (result.data.id === s.id) {
-    stopPlay('The next generation has the same ID as this one, so the board is a still life. Playback stopped.');
-    return;
-  }
-  setCurrent(result.data, { gen: s.gen === null ? null : s.gen + 1n });
-  showFinalIfReached();
+  fillBuffer();
   state.playTimer = setTimeout(playStep, currentDelay());
 }
 
@@ -1059,11 +1159,40 @@ el.play.addEventListener('click', () => {
   else startPlay();
 });
 
-function updateSpeedLabel() {
-  el.speedOut.textContent = SPEEDS[Number(el.speed.value)]?.label ?? '';
+function speedLabel(rate) {
+  return rate === state.limits.maxBoardsPerSecond ? `${rate} per second (max)` : `${rate} per second`;
 }
 
-el.speed.addEventListener('input', updateSpeedLabel);
+function updateSpeedLabel() {
+  el.speedOut.textContent = speedLabel(currentRate());
+}
+
+// Builds the speed slider from the server's cap, keeping the chosen speed where it still fits.
+function applySpeeds() {
+  const chosen = state.speeds.length ? currentRate() : DEFAULT_SPEED;
+  const max = state.limits.maxBoardsPerSecond;
+  state.speeds = [...BASE_SPEEDS.filter((rate) => rate < max), max];
+  let index = state.speeds.findLastIndex((rate) => rate <= chosen);
+  if (index < 0) index = 0;
+  el.speed.max = String(state.speeds.length - 1);
+  el.speed.value = String(index);
+  updateSpeedLabel();
+}
+
+async function loadSettings() {
+  const result = await api('GET', '/settings');
+  const data = result.data;
+  if (!result.ok || !data || !Number.isInteger(data.maxBoardsPerSecond) || !Number.isInteger(data.maxBatchSize)) return;
+  if (data.maxBoardsPerSecond < 1 || data.maxBatchSize < 1) return;
+  state.limits = { maxBoardsPerSecond: data.maxBoardsPerSecond, maxBatchSize: data.maxBatchSize };
+  applySpeeds();
+}
+
+el.speed.addEventListener('input', () => {
+  updateSpeedLabel();
+  // A faster speed may put the buffer under its new refill point, so check straight away.
+  fillBuffer();
+});
 
 // ---------------------------------------------------------------- API log
 
@@ -1215,9 +1344,10 @@ new ResizeObserver(() => {
 }).observe(el.stage);
 window.addEventListener('resize', layoutCanvas);
 
-updateSpeedLabel();
+applySpeeds();
 placePreset(PRESETS.find((p) => p.key === 'glider'));
 hideMsg(el.boardMsg);
 layoutCanvas();
 updateUI();
 checkHealth();
+loadSettings();
