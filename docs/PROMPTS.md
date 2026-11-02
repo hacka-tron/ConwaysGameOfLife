@@ -581,3 +581,11 @@ I like the recipe design, can you reccomend a recipe size given how taxing it is
 ```
 
 The assistant measured one generation at about 0.24 ms for a 256 x 256 board in a release build, and loading a compressed key board at about 0.02 ms. It recommended a key board every 64 generations. A cold read then replays at most 63 generations, about 15 ms, which is under one screen frame, and storage averages about 100 to 175 bytes per board. Larger intervals save only a few more bytes per board while making reads several times slower.
+
+### 72
+
+```text
+*I meant a recipe default size
+```
+
+The assistant confirmed the recommendation was for the default, a key board every 64 generations, kept as a setting so it can be changed.
