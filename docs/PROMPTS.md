@@ -482,4 +482,5 @@ The assistant confirmed that one final state request covers a whole run. Loading
 ```text
 ok that isn't necessary, it should happend when we load the board or a new board is in action, as regardless of if we press next or play the final state will always be the same
 ```
+
 The UI now asks for a board's final state as soon as the board is loaded or saved, instead of on the first Next, Jump or Play. That one answer is reused by every later step and by Find final state on the same board.
