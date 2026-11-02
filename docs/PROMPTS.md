@@ -614,6 +614,7 @@ for smaller boards, store these compressed boards in full as they are small
 for larger baoards, use recipes and save the board at key intervals, that way this becomes less memory to manage for both cold storage and memory
 ```
 
+Boards whose packed cells fit in 1 KB, such as 32 x 48 or 64 x 64, are now stored in full. Larger boards keep their full cells only at uploads, final boards and every 64th generation, and every other board is a recipe that replays from its key board, checked against its ID. Every generation a request computes is saved, and jumps walk the saved links before computing anything.
 
 ### 76
 
@@ -621,9 +622,28 @@ for larger baoards, use recipes and save the board at key intervals, that way th
 also make this classification clear in code so there are two clear paths, one for fully stored boards, one for recipe based boards
 ```
 
+A single policy class sorts each board into stored in full or stored as a recipe, and the store has separate read and write paths for each kind.
+
 ### 77
 
 ```text
 also can you describe how many boards will be able to be stored with this new optimization
 ```
 
+Measured on real runs with the default 1 GB store, counting each board with its next link and final state, that is about 1.25 million 32 x 48 boards or about 1.6 million 256 x 256 boards, about 10 times more than storing large boards in full.
+
+### 78
+
+```text
+do jumps make use of recipes for recipe boards
+```
+
+The assistant confirmed that jumps use recipes. A jump follows saved next links as IDs only, then rebuilds just the target board from its recipe, replaying at most 63 generations from its key board. Boards computed past the end of the saved links are stored as recipes and key boards too. It noted that the starting board is also rebuilt on every jump even when only its final state record is needed, which costs up to about 15 ms at 256 x 256 and could be skipped.
+
+### 79
+
+```text
+ok this is good, finish this work, then upload our local commit to origin
+```
+
+The recipe storage work was reviewed independently. The review found that saved links could change whether a jump past the step limit succeeded, so walked links now count against the limit and the same request always gets the same answer. Jumps also stopped rebuilding the starting board just to read its final state. The work was merged and pushed to GitHub.
