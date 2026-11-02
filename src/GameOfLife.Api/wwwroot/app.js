@@ -378,8 +378,10 @@ function resize(width, height) {
   syncSizeInputs();
 }
 
-// Called after any local change to the drawn cells.
+// Called after any local change to the drawn cells, size or edge rule. The edited board is a new
+// board with its own future, so the run and its final state no longer apply.
 function boardEdited() {
+  hideFinal();
   const s = state.stored;
   state.edited =
     !s ||
@@ -636,7 +638,6 @@ function localEdit(action) {
   if (state.playing) stopPlay('Playback paused because the board was edited.');
   hideMsg(el.boardMsg);
   hideMsg(el.loadMsg);
-  hideFinal();
   action();
   boardEdited();
 }
