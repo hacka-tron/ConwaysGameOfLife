@@ -647,3 +647,11 @@ ok this is good, finish this work, then upload our local commit to origin
 ```
 
 The recipe storage work was reviewed independently. The review found that saved links could change whether a jump past the step limit succeeded, so walked links now count against the limit and the same request always gets the same answer. Jumps also stopped rebuilding the starting board just to read its final state. The work was merged and pushed to GitHub.
+
+### 80
+
+```text
+Also the architecture is too heavy to read, cut out the fluff and focus on the main points a reviewer would care about and that stand out about this design
+```
+
+The architecture document was cut from about 3,900 words to about 1,300. It now leads with the six decisions that stand out, content-hash IDs, never computing twice, full and recipe storage with measured capacity, durable embedded storage, batched rate-limited playback and a UI that checks the server, followed by short sections on scaling, known limits and code layout.
