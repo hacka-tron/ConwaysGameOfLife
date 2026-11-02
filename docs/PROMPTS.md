@@ -565,3 +565,11 @@ also do we currently compress the board storage somehow since each board has a l
 ```
 
 The assistant explained that boards are only bit-packed, at one bit per cell, so a 256 x 256 board is always 8,192 bytes whatever it holds. It measured about 21 KB on disk per board, because LMDB puts values that large in their own pages. Compressing the packed bits would barely help a random board but would shrink a settled board about 5 times and a lone glider about 200 times, and it would keep most boards out of those separate pages. Board IDs would not change, since they hash the uncompressed cells.
+
+### 70
+
+```text
+what is storage vs response compression?
+```
+
+The assistant explained that storage compression shrinks boards where they are saved in LMDB, which saves disk and cache space, while response compression shrinks the JSON sent to the browser over HTTP, which saves network bandwidth. They are independent, and either can be added without the other.
