@@ -88,4 +88,6 @@ Set in `src/GameOfLife.Api/appsettings.json`, or per run with environment variab
 
 ## AI usage
 
-Built with an AI coding assistant. Every prompt is recorded in [docs/PROMPTS.md](docs/PROMPTS.md).
+Built with an AI coding assistant. Every prompt for the API and the original browser UI is recorded in [docs/PROMPTS.md](docs/PROMPTS.md).
+
+One extra surprise. I built the Observatory look of the browser UI, where cells are drawn as stars that change color as they age and leave fading trails, without recording its prompts. So that work is not in the log.
