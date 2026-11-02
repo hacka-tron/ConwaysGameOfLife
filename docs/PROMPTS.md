@@ -500,3 +500,11 @@ this is good, so we are asking for final once whenever a board is first loaded o
 ```
 
 The assistant confirmed the behaviour. The final state is requested once when a board is loaded or saved, kept in the browser's memory for that run, and requested again after any edit or a new load. The server also keeps every final state it has computed, so asking again is a quick lookup.
+
+### 62
+
+```text
+ok so a few more questions, if we kept the board size at 64 x 64, and let people shrink it down and expand it, but everything request ran on this size board, would we be able to save everything in memory?
+```
+
+The assistant explained that every possible 64 x 64 board still cannot be stored, since there are about 10 to the power 1,233 of them. Every board people actually reach fits in memory easily, at about 512 bytes each, so a million boards is about half a gigabyte. LMDB is memory-mapped, so the boards in use are already served from RAM. Running smaller boards inside a fixed 64 x 64 board would also change their results, because patterns could grow past the smaller edge.
