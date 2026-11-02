@@ -14,7 +14,7 @@ namespace GameOfLife.Infrastructure;
 /// <remarks>
 /// Keys and values:
 /// <list type="bullet">
-/// <item><c>board:{id}</c> holds the format version, width, height, edge rule and packed cells.</item>
+/// <item><c>board:{id}</c> holds the board in the form <see cref="BoardCodec"/> writes, compressed when that is smaller.</item>
 /// <item><c>next:{id}</c> holds the ID of the next generation.</item>
 /// <item><c>final:{id}</c> holds steps, period and the ID of the final board.</item>
 /// </list>
@@ -23,9 +23,6 @@ namespace GameOfLife.Infrastructure;
 /// </remarks>
 public sealed class LmdbBoardStore : IBoardStore, IDisposable
 {
-    private const byte BoardFormatVersion = 1;
-    private const int BoardHeaderLength = 1 + 4 + 4 + 4;
-
     private readonly LightningEnvironment _environment;
     private readonly LightningDatabase _database;
 
@@ -60,7 +57,7 @@ public sealed class LmdbBoardStore : IBoardStore, IDisposable
             ? DecodeFinal(finalValue!)
             : null;
 
-        return Task.FromResult<BoardRecord?>(new BoardRecord(DecodeBoard(boardValue!), nextId, final));
+        return Task.FromResult<BoardRecord?>(new BoardRecord(BoardCodec.Decode(boardValue!), nextId, final));
     }
 
     public Task<IReadOnlyList<Board>> GetChainAsync(string fromId, int maxLength, CancellationToken cancellationToken)
@@ -73,7 +70,7 @@ public sealed class LmdbBoardStore : IBoardStore, IDisposable
             && transaction.TryGet(_database, Key("next", id), out byte[]? nextValue)
             && transaction.TryGet(_database, Key("board", id = Encoding.ASCII.GetString(nextValue!)), out byte[]? boardValue))
         {
-            chain.Add(DecodeBoard(boardValue!));
+            chain.Add(BoardCodec.Decode(boardValue!));
         }
 
         return Task.FromResult<IReadOnlyList<Board>>(chain);
@@ -160,14 +157,15 @@ public sealed class LmdbBoardStore : IBoardStore, IDisposable
     private bool PutBoard(LightningTransaction transaction, Board board)
     {
         byte[] key = Key("board", board.Id);
-        byte[] value = EncodeBoard(board);
+        byte[] value = BoardCodec.Encode(board);
         var result = transaction.Put(_database, key, value, PutOptions.NoOverwrite);
         if (result == MDBResultCode.KeyExist)
         {
             // A SHA-256 collision is practically impossible, but checking is cheap and turns
-            // silent corruption into a loud failure.
+            // silent corruption into a loud failure. The boards are compared rather than the bytes,
+            // because a board stored in an older format has different bytes for the same cells.
             transaction.TryGet(_database, key, out byte[]? stored);
-            if (!stored.AsSpan().SequenceEqual(value))
+            if (!BoardCodec.Decode(stored).ContentEquals(board))
             {
                 throw new InvalidOperationException($"Two different boards hashed to the same ID '{board.Id}'.");
             }
@@ -183,31 +181,6 @@ public sealed class LmdbBoardStore : IBoardStore, IDisposable
         transaction.Put(_database, key, value).ThrowOnError();
 
     private static byte[] Key(string kind, string id) => Encoding.ASCII.GetBytes($"{kind}:{id}");
-
-    private static byte[] EncodeBoard(Board board)
-    {
-        var value = new byte[BoardHeaderLength + board.PackedCells.Length];
-        value[0] = BoardFormatVersion;
-        BinaryPrimitives.WriteInt32LittleEndian(value.AsSpan(1), board.Width);
-        BinaryPrimitives.WriteInt32LittleEndian(value.AsSpan(5), board.Height);
-        Encoding.ASCII.GetBytes(board.EdgeMode.ToKey(), value.AsSpan(9, 4));
-        board.PackedCells.CopyTo(value.AsSpan(BoardHeaderLength));
-        return value;
-    }
-
-    private static Board DecodeBoard(byte[] value)
-    {
-        if (value[0] != BoardFormatVersion)
-        {
-            throw new InvalidDataException($"Unsupported board format version {value[0]}.");
-        }
-
-        return Board.FromPacked(
-            BinaryPrimitives.ReadInt32LittleEndian(value.AsSpan(1)),
-            BinaryPrimitives.ReadInt32LittleEndian(value.AsSpan(5)),
-            EdgeModeKeys.Parse(Encoding.ASCII.GetString(value, 9, 4)),
-            value.AsSpan(BoardHeaderLength));
-    }
 
     private static byte[] EncodeFinal(string boardId, int steps, int period)
     {
