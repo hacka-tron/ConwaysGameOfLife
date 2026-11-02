@@ -428,3 +428,11 @@ so how do we stream long lines of boards? is it a http request each time, or do 
 ```
 
 The assistant confirmed there is no streaming. Every generation is its own HTTP request, and the browser reuses one kept-alive TCP connection for them. It compared Server-Sent Events, WebSockets and batching as ways to stream long runs.
+
+### 53
+
+```text
+ok can you explain this batching approach, it seems like we are paginating requests, so at what point do we ask for the next batch?
+```
+
+The assistant explained batching as cursor pagination, where the last board's ID is the cursor. The client keeps a buffer of upcoming boards and asks for the next batch while enough are left to cover one round trip, so playback never waits. A batch that reaches a cycle tells the client to loop locally with no further requests.
