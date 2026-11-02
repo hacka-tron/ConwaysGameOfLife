@@ -557,3 +557,11 @@ first explain this to me, and geneate an artifact so I understand how this will 
 ```
 
 The assistant confirmed the trade. Recipes save about 60 times the storage at 256 x 256 and make every intermediate step loadable, in exchange for replaying up to K generations when a board is read. It published an interactive explainer where the checkpoint interval and the loaded generation can be changed to see the replay cost and the storage size.
+
+### 69
+
+```text
+also do we currently compress the board storage somehow since each board has a lot of unused space
+```
+
+The assistant explained that boards are only bit-packed, at one bit per cell, so a 256 x 256 board is always 8,192 bytes whatever it holds. It measured about 21 KB on disk per board, because LMDB puts values that large in their own pages. Compressing the packed bits would barely help a random board but would shrink a settled board about 5 times and a lone glider about 200 times, and it would keep most boards out of those separate pages. Board IDs would not change, since they hash the uncompressed cells.
