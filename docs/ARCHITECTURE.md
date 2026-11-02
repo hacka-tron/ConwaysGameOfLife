@@ -80,6 +80,7 @@ The UI is three static files in `src/GameOfLife.Api/wwwroot` with no framework a
 
 - It computes a drawn board's ID in the browser with the same SHA-256 layout as the server, so the ID updates as you draw. Every board the server returns is hashed again in the browser, and a mismatch would show a warning, so the two implementations cannot drift apart unnoticed.
 - A drawn board is saved with `POST /boards` the first time an operation needs it.
+- A board's final state is asked for once, as soon as it is loaded or saved. Every later generation reaches the same final board, so Next, Jump, Play and Find final state reuse that answer, and the Final state panel appears once stepping reaches it. Editing the board or loading another one starts over.
 - Every request is shown in the API log, and IDs there can be copied with a click.
 - All server data is written to the page with `textContent`, never as HTML.
 

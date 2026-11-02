@@ -836,6 +836,8 @@ async function saveBoard(target) {
     return null;
   }
   setCurrent(result.data, { gen: 0n });
+  // A newly saved board starts a new run, so its final state is asked for straight away.
+  startRun();
   return result;
 }
 
@@ -871,6 +873,8 @@ function loadById() {
     if (!result.ok) return showProblem(el.loadMsg, result.problem);
     if (!isBoardResponse(result.data)) return showProblem(el.loadMsg, badResponse(result.status));
     setCurrent(result.data, { gen: 0n });
+    // A loaded board starts a new run, so its final state is asked for straight away.
+    startRun();
     showInfo(el.loadMsg, `Loaded board ${shortId(result.data.id)} from the server.`, 'success');
   });
 }
@@ -941,16 +945,20 @@ function isFinalResponse(data) {
 function findFinal() {
   hideMsg(el.opsMsg);
   hideMsg(el.loadMsg);
-  hideFinal();
+  el.finalCard.hidden = true;
   return runBusy(el.final, async () => {
     const s = await ensureStored(el.opsMsg);
     if (!s) return;
-    const result = await api('GET', `/boards/${encodeURIComponent(s.id)}/final`);
+    // On the board the run started from, reuse the request made when it was loaded or saved.
+    const result =
+      state.run?.fromId === s.id
+        ? await state.run.request
+        : await api('GET', `/boards/${encodeURIComponent(s.id)}/final`);
     if (!result.ok) return showProblem(el.opsMsg, result.problem);
     const data = result.data;
     if (!isFinalResponse(data)) return showProblem(el.opsMsg, badResponse(result.status));
     setCurrent(data.board, { gen: s.gen === null ? null : s.gen + BigInt(data.steps) });
-    state.run = { fromId: s.id, startGen: s.gen, final: data };
+    state.run = { fromId: s.id, startGen: s.gen, final: data, request: Promise.resolve(result) };
     showFinal(data, s.id);
   });
 }
@@ -968,18 +976,23 @@ function hideFinal() {
   state.run = null;
 }
 
-// Starts a run from the current board if none is going, and asks for its final state alongside the
-// stepping. If the board never settles within the step limit, the panel simply never appears.
-async function startRun() {
+// Starts a run from the current board if none is going, and asks for its final state once. Every
+// board after it reaches the same final board, so Next, Jump and Play all reuse this one answer.
+// A run starts when a board is loaded or saved, and an edit or another load ends it. If the board
+// never settles within the step limit, the panel simply never appears.
+function startRun() {
   if (state.run) return;
-  const run = { fromId: state.stored.id, startGen: state.stored.gen, final: null };
+  const run = { fromId: state.stored.id, startGen: state.stored.gen, final: null, request: null };
   state.run = run;
-  const result = await api('GET', `/boards/${encodeURIComponent(run.fromId)}/final`);
-  // hideFinal replaces the run when the board changes, which drops answers that no longer apply.
-  if (state.run !== run || !result.ok || !isFinalResponse(result.data)) return;
-  run.final = result.data;
-  // Stepping may already have reached the final state by the time the answer arrives.
-  showFinalIfReached();
+  run.request = api('GET', `/boards/${encodeURIComponent(run.fromId)}/final`).then((result) => {
+    // hideFinal replaces the run when the board changes, which drops answers that no longer apply.
+    if (state.run === run && result.ok && isFinalResponse(result.data)) {
+      run.final = result.data;
+      // Stepping may already have reached the final state by the time the answer arrives.
+      showFinalIfReached();
+    }
+    return result;
+  });
 }
 
 // Reached once the current board is the final board, or is at least the final state's number of

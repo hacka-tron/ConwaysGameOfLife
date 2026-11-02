@@ -476,3 +476,10 @@ and for final state, whenever we load a board, we make a separate request to get
 ```
 
 The assistant confirmed that one final state request covers a whole run. Loading a board does not ask for its final state. The first Next, Jump or Play asks once, and later steps reuse that answer because every board after it has the same final board and period. The request is only made again after an edit or a load starts a new run. Checking this turned up a bug. Drawing on the canvas or resizing kept the old run, so the previous board's final state could be shown for the edited board. Every edit now starts a new run.
+
+### 59
+
+```text
+ok that isn't necessary, it should happend when we load the board or a new board is in action, as regardless of if we press next or play the final state will always be the same
+```
+The UI now asks for a board's final state as soon as the board is loaded or saved, instead of on the first Next, Jump or Play. That one answer is reused by every later step and by Find final state on the same board.
