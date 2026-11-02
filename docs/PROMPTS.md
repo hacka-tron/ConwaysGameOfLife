@@ -468,3 +468,11 @@ also can you start the app locally so I can mess with it
 ```
 
 The assistant started the API and browser UI locally for hands-on testing.
+
+### 58
+
+```text
+and for final state, whenever we load a board, we make a separate request to get the final state, and basically we just do this the first time we load a new board as all subsequent states will have the same final state right?
+```
+
+The assistant confirmed that one final state request covers a whole run. Loading a board does not ask for its final state. The first Next, Jump or Play asks once, and later steps reuse that answer because every board after it has the same final board and period. The request is only made again after an edit or a load starts a new run.
