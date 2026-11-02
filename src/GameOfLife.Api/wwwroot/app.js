@@ -1118,10 +1118,13 @@ function stopPlay(message, { keepBuffer = false } = {}) {
   state.busy = false;
   state.playback = null;
   state.parked = null;
+  // A rate limit wait message no longer applies once playback stops.
+  if (pb?.waitShown) hideMsg(el.opsMsg);
   if (keepBuffer && pb) {
     // A batch still in flight is dropped when it answers, and fetched again after Play.
     pb.fetchId++;
     pb.fetching = false;
+    pb.waitShown = false;
     state.parked = { playback: pb, boardId: state.stored.id };
   }
   clearTimeout(state.playTimer);
