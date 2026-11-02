@@ -492,3 +492,11 @@ also I notice a weird behavior when i click load, and then draw something on teh
 ```
 
 The assistant repeated these steps in the browser on the current code. It loaded a block, drew a blinker beside it and pressed Play, and the Final state panel described the drawn board, not the loaded one. The fix from prompt 58, where every edit starts a new run, already covered this, so no further change was needed.
+
+### 61
+
+```text
+this is good, so we are asking for final once whenever a board is first loaded or saved in storage, and afterwards we keep the boards final state in memory, unless a new board in drawn in which case the client requests that again
+```
+
+The assistant confirmed the behaviour. The final state is requested once when a board is loaded or saved, kept in the browser's memory for that run, and requested again after any edit or a new load. The server also keeps every final state it has computed, so asking again is a quick lookup.
