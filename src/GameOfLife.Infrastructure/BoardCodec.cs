@@ -26,6 +26,9 @@ public static class BoardCodec
     private const int BrotliQuality = 4;
     private const int BrotliWindow = 22;
 
+    // The largest board the settings allow, 4096 x 4096.
+    private const long MaxCells = 4096L * 4096;
+
     public static byte[] Encode(Board board)
     {
         ReadOnlySpan<byte> cells = board.PackedCells;
@@ -52,9 +55,20 @@ public static class BoardCodec
 
     public static Board Decode(ReadOnlySpan<byte> value)
     {
+        if (value.Length < HeaderLength)
+        {
+            throw new InvalidDataException("A stored board is shorter than its header.");
+        }
+
         byte format = value[0];
         int width = BinaryPrimitives.ReadInt32LittleEndian(value[1..]);
         int height = BinaryPrimitives.ReadInt32LittleEndian(value[5..]);
+        // Checked before anything is allocated, so a damaged record fails cleanly.
+        if (width < 1 || height < 1 || (long)width * height > MaxCells)
+        {
+            throw new InvalidDataException($"A stored board has an invalid size of {width}x{height}.");
+        }
+
         var edgeMode = EdgeModeKeys.Parse(Encoding.ASCII.GetString(value.Slice(9, 4)));
         ReadOnlySpan<byte> payload = value[HeaderLength..];
 

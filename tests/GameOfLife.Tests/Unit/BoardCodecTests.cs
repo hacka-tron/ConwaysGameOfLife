@@ -51,6 +51,18 @@ public class BoardCodecTests
         Assert.True(board.ContentEquals(decoded));
     }
 
+    [Fact]
+    public void DamagedRecordsFailWithAClearError()
+    {
+        var value = BoardCodec.Encode(Make("glider-256"));
+        var truncated = value.AsSpan(0, 5).ToArray();
+        var hugeSize = value.ToArray();
+        BinaryPrimitives.WriteInt32LittleEndian(hugeSize.AsSpan(1), int.MaxValue);
+
+        Assert.Throws<InvalidDataException>(() => BoardCodec.Decode(truncated));
+        Assert.Throws<InvalidDataException>(() => BoardCodec.Decode(hugeSize));
+    }
+
     /// <summary>Format 1, written before compression was added. The header is followed by the packed cells as is.</summary>
     internal static byte[] RawFormat(Board board)
     {

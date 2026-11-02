@@ -572,3 +572,4 @@ The assistant explained that boards are only bit-packed, at one bit per cell, so
 Add the compression for both storage and response
 ```
 
+Stored boards are now Brotli-compressed when that makes them smaller, and API responses are compressed with Brotli or gzip. A played 256 x 256 board takes about 7.9 KB on disk instead of about 21 KB, and a batch of 90 boards travels as about 1 MB instead of about 12 MB. Boards saved before the change still load, and board IDs are unchanged. An independent review approved it.
