@@ -3,19 +3,29 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light dark">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#05070f">
   <title>Game of Life API</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 3 3'%3E%3Cpath fill='%232563eb' d='M1 0h1v1H1zM2 1h1v1H2zM0 2h3v1H0z'/%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 36'%3E%3Ccircle cx='18' cy='18' r='17' fill='%2305070f'/%3E%3Ccircle cx='18' cy='18' r='9' fill='none' stroke='%232b3550' stroke-width='2'/%3E%3Ccircle cx='18' cy='9' r='3.5' fill='%23fff'/%3E%3Ccircle cx='27' cy='18' r='3' fill='%23ffd27a'/%3E%3Ccircle cx='11' cy='25' r='2.5' fill='%239cc4ff'/%3E%3C/svg%3E">
+  <!-- Fonts are optional. Without network access the page falls back to system fonts. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap">
   <link rel="stylesheet" href="styles.css">
   <script type="module" src="app.js"></script>
 </head>
 <body>
   <header class="topbar">
     <div class="brand">
-      <svg class="brand-mark" viewBox="0 0 3 3" aria-hidden="true">
-        <path d="M1 0h1v1H1zM2 1h1v1H2zM0 2h3v1H0z" />
+      <svg class="brand-mark" viewBox="0 0 36 36" aria-hidden="true">
+        <circle class="orbit" cx="18" cy="18" r="16" />
+        <circle class="orbit" cx="18" cy="18" r="9" />
+        <circle class="star-new" cx="18" cy="9" r="2.5" />
+        <circle class="star-settled" cx="27" cy="18" r="2" />
+        <circle class="star-young" cx="11" cy="25" r="1.8" />
       </svg>
       <div>
+        <p class="kicker">Observatory</p>
         <h1>Game of Life API</h1>
         <p class="tagline">Draw a board and run operations on it. Its ID updates as you draw</p>
       </div>
@@ -43,14 +53,22 @@
         <canvas id="board" role="img" aria-label="Game of Life board. Click or drag to toggle cells."></canvas>
       </div>
       <div class="board-foot">
-        <span id="draft-note">Click or drag to toggle cells. Dragging paints the opposite of the first cell you touch.</span>
+        <div class="board-notes">
+          <span id="draft-note">Click or drag to toggle cells. Dragging paints the opposite of the first cell you touch.</span>
+          <ul class="legend" aria-label="Star colors show how many generations a cell has lived on screen">
+            <li><span class="legend-dot" data-age="new"></span>Newborn</li>
+            <li><span class="legend-dot" data-age="young"></span>Young</li>
+            <li><span class="legend-dot" data-age="settled"></span>Settled</li>
+            <li><span class="legend-dot" data-age="ancient"></span>Ancient</li>
+          </ul>
+        </div>
         <span class="coords" id="coords" aria-hidden="true"></span>
       </div>
     </section>
 
     <aside class="sidebar">
       <section class="card" aria-labelledby="h-board">
-        <h2 id="h-board">Board</h2>
+        <h2 id="h-board">Chart a new sky</h2>
         <div class="row size-row">
           <label class="field">
             <span>Width</span>
@@ -94,9 +112,9 @@
       </section>
 
       <section class="card" aria-labelledby="h-ops">
-        <h2 id="h-ops">Operations</h2>
+        <h2 id="h-ops">Advance time</h2>
         <div class="op-grid">
-          <button type="button" class="btn" id="next" disabled>Next generation</button>
+          <button type="button" class="btn btn-primary" id="next" disabled>Next generation</button>
           <button type="button" class="btn" id="final" disabled>Find final state</button>
         </div>
         <form class="jump" id="jump-form" novalidate>

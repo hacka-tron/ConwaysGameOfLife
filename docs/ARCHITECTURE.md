@@ -122,6 +122,7 @@ The UI is three static files in `src/GameOfLife.Api/wwwroot` with no framework a
 - A drawn board is saved with `POST /boards` the first time an operation needs it.
 - A board's final state is asked for once, as soon as it is loaded or saved. Every later generation reaches the same final board, so Next, Jump, Play and Find final state reuse that answer, and the Final state panel appears once stepping reaches it. Editing the board or loading another one starts over.
 - Every request is shown in the API log, and IDs there can be copied with a click.
+- Live cells are drawn as stars whose color shows how many generations they have lived on screen, and a cell that dies leaves a short fading trail. The API knows nothing about ages. The browser works them out by comparing each board the server returns with the one before, so this costs no extra requests.
 - All server data is written to the page with `textContent`, never as HTML.
 
 ## Performance

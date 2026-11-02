@@ -10,7 +10,16 @@ const GRID_MIN_CELL_PX = 6;
 const RANDOM_DENSITY = 0.3;
 // Keep in sync with the 900px breakpoint in styles.css.
 const WIDE_QUERY = window.matchMedia('(min-width: 900px)');
-const DARK_QUERY = window.matchMedia('(prefers-color-scheme: dark)');
+
+// Live cells are drawn as stars colored by how many generations they have lived on screen, and a cell
+// that dies leaves a trail that fades over TRAIL_STEPS generations. The API knows nothing about ages,
+// the browser works them out by comparing each board it shows with the one before.
+const AGE_YOUNG = 2;
+const AGE_SETTLED = 6;
+const AGE_ANCIENT = 30;
+const TRAIL_STEPS = 6;
+// Below this many device pixels per cell, stars are drawn as plain squares with no glow.
+const STAR_MIN_PX = 4;
 
 // Play speeds in boards per second. The server's MaxBoardsPerSecond is always the top speed, and
 // slower speeds above it are dropped, so the UI never asks for more than the server allows.
@@ -382,6 +391,8 @@ function resize(width, height) {
 // board with its own future, so the run and its final state no longer apply.
 function boardEdited() {
   hideFinal();
+  // An edit is not a generation, so old trails would only be clutter on the new board.
+  life.trail.fill(0);
   const s = state.stored;
   state.edited =
     !s ||
@@ -395,9 +406,11 @@ function boardEdited() {
 }
 
 function setCurrent(board, { gen }) {
+  const cells = fromRows(board.cells, board.width, board.height);
+  if (board.width === state.width && board.height === state.height) advanceLife(cells);
   state.width = board.width;
   state.height = board.height;
-  state.cells = fromRows(board.cells, board.width, board.height);
+  state.cells = cells;
   state.stored = {
     id: board.id,
     edgeMode: board.edgeMode,
@@ -417,22 +430,78 @@ function setCurrent(board, { gen }) {
   updateUI();
 }
 
+// ---------------------------------------------------------------- Ages and trails
+
+// Age and trail of every cell on screen. An age of 0 means dead, and a trail counts down from
+// TRAIL_STEPS to 0 after a cell dies.
+const life = { width: 0, height: 0, age: new Uint16Array(0), trail: new Uint8Array(0) };
+
+function resetLife(width, height) {
+  life.width = width;
+  life.height = height;
+  life.age = new Uint16Array(width * height);
+  life.trail = new Uint8Array(width * height);
+}
+
+// Moves ages on by one generation when a board from the server replaces the one on screen. The same
+// cells again, as after a save, are not a new generation.
+function advanceLife(next) {
+  if (life.width !== state.width || life.height !== state.height || sameCells(state.cells, next)) return;
+  const { age, trail } = life;
+  for (let i = 0; i < next.length; i++) {
+    if (next[i]) {
+      age[i] = state.cells[i] ? Math.min(age[i] + 1, 65535) : 1;
+      trail[i] = 0;
+    } else {
+      trail[i] = state.cells[i] ? TRAIL_STEPS : Math.max(0, trail[i] - 1);
+      age[i] = 0;
+    }
+  }
+}
+
+// Brings ages in line with the cells after edits and resizes. A drawn cell is a newborn and an erased
+// one simply goes dark. Trails and aging come only from generations, in advanceLife.
+function syncLife() {
+  if (life.width !== state.width || life.height !== state.height) resetLife(state.width, state.height);
+  const { age, trail } = life;
+  const cells = state.cells;
+  for (let i = 0; i < cells.length; i++) {
+    if (cells[i] && !age[i]) {
+      age[i] = 1;
+      trail[i] = 0;
+    } else if (!cells[i] && age[i]) {
+      age[i] = 0;
+    }
+  }
+}
+
+// 0 newborn, 1 young, 2 settled, 3 ancient. Boards with no ages, like the final state thumbnail, are settled.
+function ageBand(age) {
+  if (!age) return 2;
+  if (age < AGE_YOUNG) return 0;
+  if (age < AGE_SETTLED) return 1;
+  return age < AGE_ANCIENT ? 2 : 3;
+}
+
 // ---------------------------------------------------------------- Drawing
 
 const ctx = el.canvas.getContext('2d');
-let colors = readColors();
+const colors = readColors();
 let view = { cell: 10 };
 let drawQueued = false;
-// The last final board, kept so a theme change can repaint its thumbnail.
-let finalBoard = null;
 
 function readColors() {
   const css = getComputedStyle(document.documentElement);
   const read = (name, fallback) => css.getPropertyValue(name).trim() || fallback;
   return {
-    alive: read('--cell-alive', '#2557d6'),
-    dead: read('--cell-dead', '#ffffff'),
-    grid: read('--cell-grid', '#e3e6eb'),
+    grid: read('--cell-grid', 'rgba(120, 140, 200, 0.16)'),
+    stars: [
+      read('--star-new', '#ffffff'),
+      read('--star-young', '#9cc4ff'),
+      read('--star-settled', '#ffd27a'),
+      read('--star-ancient', '#ff8f5e'),
+    ],
+    trail: read('--star-trail', '120, 150, 255'),
   };
 }
 
@@ -455,7 +524,13 @@ function layoutCanvas() {
   draw();
 }
 
-function paint(canvas, width, height, cells, cell, withGrid) {
+// Star radius and glow blur as shares of the cell. Newborns are the largest and brightest.
+const STAR_RADIUS = [0.4, 0.34, 0.32, 0.36];
+const STAR_GLOW = [1.2, 0.8, 0.6, 0.7];
+
+// Paints a board as a starfield. ages and trails come from life for the main board and are null for
+// thumbnails. withGrid adds a faint dust dot in each empty cell once cells are large enough.
+function paint(canvas, width, height, cells, cell, withGrid, ages = null, trails = null) {
   const dpr = window.devicePixelRatio || 1;
   const cssW = width * cell;
   const cssH = height * cell;
@@ -468,34 +543,73 @@ function paint(canvas, width, height, cells, cell, withGrid) {
 
   const g = canvas.getContext('2d');
   g.setTransform(1, 0, 0, 1, 0, 0);
-  g.fillStyle = colors.dead;
-  g.fillRect(0, 0, pxW, pxH);
+  g.globalAlpha = 1;
+  // Empty space is transparent, so the canvas background set in styles.css shows through.
+  g.clearRect(0, 0, pxW, pxH);
 
-  // Cell edges are rounded to device pixels so neighbors never overlap or leave gaps.
-  const xs = new Array(width + 1);
-  const ys = new Array(height + 1);
-  for (let x = 0; x <= width; x++) xs[x] = Math.round((x * pxW) / width);
-  for (let y = 0; y <= height; y++) ys[y] = Math.round((y * pxH) / height);
+  const cw = pxW / width;
+  const ch = pxH / height;
+  const size = Math.min(cw, ch);
 
-  g.fillStyle = colors.alive;
-  for (let y = 0; y < height; y++) {
-    const row = y * width;
-    for (let x = 0; x < width; x++) {
-      if (cells[row + x]) g.fillRect(xs[x], ys[y], xs[x + 1] - xs[x], ys[y + 1] - ys[y]);
+  // Tiny cells, as on a 256 wide board on a phone, are plain squares so every cell stays visible.
+  if (size < STAR_MIN_PX) {
+    const xs = new Array(width + 1);
+    const ys = new Array(height + 1);
+    for (let x = 0; x <= width; x++) xs[x] = Math.round((x * pxW) / width);
+    for (let y = 0; y <= height; y++) ys[y] = Math.round((y * pxH) / height);
+    for (let band = 0; band < 4; band++) {
+      g.fillStyle = colors.stars[band];
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const i = y * width + x;
+          if (cells[i] && ageBand(ages?.[i]) === band) g.fillRect(xs[x], ys[y], xs[x + 1] - xs[x], ys[y + 1] - ys[y]);
+        }
+      }
     }
+    return;
   }
+
+  // Each group is one path and one fill, so a large board costs a handful of draw calls.
+  const circles = (radius, pick) => {
+    g.beginPath();
+    for (let y = 0; y < height; y++) {
+      const cy = (y + 0.5) * ch;
+      for (let x = 0; x < width; x++) {
+        if (!pick(y * width + x)) continue;
+        const cx = (x + 0.5) * cw;
+        g.moveTo(cx + radius, cy);
+        g.arc(cx, cy, radius, 0, Math.PI * 2);
+      }
+    }
+    g.fill();
+  };
 
   if (withGrid && cell >= GRID_MIN_CELL_PX) {
     g.fillStyle = colors.grid;
-    const line = Math.max(1, Math.round(dpr));
-    for (let x = 1; x < width; x++) g.fillRect(xs[x], 0, line, pxH);
-    for (let y = 1; y < height; y++) g.fillRect(0, ys[y], pxW, line);
+    circles(Math.max(0.75, size * 0.08), (i) => !cells[i] && !trails?.[i]);
   }
+
+  if (trails) {
+    for (let level = 1; level <= TRAIL_STEPS; level++) {
+      g.fillStyle = `rgba(${colors.trail}, ${(0.06 * level).toFixed(2)})`;
+      circles(size * 0.3, (i) => !cells[i] && trails[i] === level);
+    }
+  }
+
+  // The glow is one canvas shadow per color band, so it costs four blurs per frame however many stars there are.
+  for (let band = 0; band < 4; band++) {
+    g.fillStyle = colors.stars[band];
+    g.shadowColor = colors.stars[band];
+    g.shadowBlur = size * STAR_GLOW[band];
+    circles(size * STAR_RADIUS[band], (i) => cells[i] && ageBand(ages?.[i]) === band);
+  }
+  g.shadowBlur = 0;
 }
 
 function draw() {
   drawQueued = false;
-  paint(el.canvas, state.width, state.height, state.cells, view.cell, true);
+  syncLife();
+  paint(el.canvas, state.width, state.height, state.cells, view.cell, true, life.age, life.trail);
 }
 
 function scheduleDraw() {
@@ -972,7 +1086,6 @@ function finalCellSize(board) {
 // The Final state panel describes one Find final state result, so anything that changes the board hides it.
 function hideFinal() {
   el.finalCard.hidden = true;
-  finalBoard = null;
   state.run = null;
 }
 
@@ -1049,7 +1162,6 @@ function showFinal(data, fromId) {
   paint(el.finalCanvas, b.width, b.height, fromRows(b.cells, b.width, b.height), cell, false);
   el.finalCanvas.setAttribute('aria-label', `Final board, ${b.width} by ${b.height}`);
   el.finalCard.hidden = false;
-  finalBoard = b;
 }
 
 // ---------------------------------------------------------------- Play
@@ -1405,17 +1517,6 @@ el.loadForm.addEventListener('submit', (event) => {
 });
 el.loadId.addEventListener('input', () => el.loadId.removeAttribute('aria-invalid'));
 
-function retheme() {
-  colors = readColors();
-  draw();
-  if (finalBoard && !el.finalCard.hidden) {
-    const b = finalBoard;
-    const cell = finalCellSize(b);
-    paint(el.finalCanvas, b.width, b.height, fromRows(b.cells, b.width, b.height), cell, false);
-  }
-}
-
-DARK_QUERY.addEventListener('change', retheme);
 WIDE_QUERY.addEventListener('change', layoutCanvas);
 
 let lastStageSize = '';
