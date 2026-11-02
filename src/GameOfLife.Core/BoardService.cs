@@ -101,7 +101,7 @@ public sealed class BoardService(
         var boards = run.FinalStepsAlongPath().ToList();
         if (boards.Count == 0)
         {
-            // The starting board's final state was already saved.
+            // The run started on a board with a known final state, so there is nothing new to save.
             return;
         }
 
