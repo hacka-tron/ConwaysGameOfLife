@@ -349,23 +349,6 @@ input {
   box-shadow: 0 0 0 1px var(--border);
 }
 
-/* Below the wide breakpoint the stage grows with the board, so it keeps a strip below it for the
-   play button. Keep this breakpoint in sync with WIDE_QUERY in app.js. */
-@media (max-width: 899px) {
-  .stage {
-    padding-bottom: 76px;
-  }
-}
-
-/* Set by layoutCanvas when a board would sit under the play button. */
-.stage[data-dodge="up"] canvas {
-  align-self: start;
-}
-
-.stage[data-dodge="right"] canvas {
-  justify-self: end;
-}
-
 .stage canvas.is-locked {
   cursor: progress;
 }
@@ -721,11 +704,15 @@ input {
   stroke-width: 1.5;
 }
 
-/* Play sits on the board, bottom left, as a round button with its label beside it. */
+/* Play sits beside the speed slider, as a round button with its label next to it. */
+.play {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
 .btn-play {
-  position: absolute;
-  left: 18px;
-  bottom: 14px;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -1055,12 +1042,7 @@ input {
   }
 
   .stage {
-    padding: 10px 10px 70px;
-  }
-
-  .btn-play {
-    left: 10px;
-    bottom: 11px;
+    padding: 10px;
   }
 
   .btn,
