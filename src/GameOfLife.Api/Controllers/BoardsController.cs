@@ -100,7 +100,7 @@ public sealed class BoardsController(BoardService boards, PlaybackRateLimiter pl
     }
 
     /// <summary>
-    /// Returns the state the board settles into: a still life, or the canonical member of the cycle it repeats.
+    /// Returns the state the board settles into: extinction, a still life, or the canonical member of the cycle it repeats.
     /// </summary>
     /// <response code="422">The board did not settle within the configured step limit.</response>
     [HttpGet("{id}/final")]

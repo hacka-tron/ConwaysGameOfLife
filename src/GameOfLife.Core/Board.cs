@@ -45,6 +45,9 @@ public sealed class Board
 
     public ReadOnlySpan<byte> PackedCells => _cells;
 
+    /// <summary>True when no cell is alive. Bits past the last cell are always zero, so every byte is checked as is.</summary>
+    public bool IsEmpty => !_cells.AsSpan().ContainsAnyExcept((byte)0);
+
     public bool this[int x, int y]
     {
         get

@@ -516,3 +516,11 @@ so essentially at any board size, there are enough permutations of unique boards
 ```
 
 The assistant confirmed this for any board bigger than about 6 x 6, since the count doubles with every added cell. Hashlife never stores every board. It only remembers the patterns that actually occur, and the only table it fills completely is the 65,536 cases of a 4 x 4 patch. Symmetry trims the count by a small factor at most, so the practical approach is to compute on demand and remember the answers.
+
+### 64
+
+```text
+also you should record an extinction final state for boards that dissapear, right now it just gets called still life
+```
+
+A board whose cells all die now reports the final state kind extinct instead of still life, in the API and in the browser UI. Next and Play also say that every cell has died when an empty board stops changing.

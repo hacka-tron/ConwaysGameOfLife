@@ -175,6 +175,27 @@ public sealed class BoardsApiTests : IDisposable
     }
 
     [Fact]
+    public async Task FinalReportsExtinctionWhenEveryCellDies()
+    {
+        var pair = await UploadAsync(["....", ".##.", "....", "...."]);
+
+        var final = await _client.GetFromJsonAsync<FinalStateResponse>($"/boards/{pair.Id}/final");
+
+        Assert.Equal((1, 1, "extinct"), (final!.Steps, final.Period, final.Kind));
+        Assert.All(final.Board.Cells, row => Assert.All(row, cell => Assert.Equal(0, cell)));
+    }
+
+    [Fact]
+    public async Task AnEmptyBoardIsAlreadyExtinct()
+    {
+        var empty = await UploadAsync(["...", "...", "..."]);
+
+        var final = await _client.GetFromJsonAsync<FinalStateResponse>($"/boards/{empty.Id}/final");
+
+        Assert.Equal((empty.Id, 0, "extinct"), (final!.Board.Id, final.Steps, final.Kind));
+    }
+
+    [Fact]
     public async Task UnknownBoardReturnsNotFound()
     {
         foreach (string path in new[] { "", "/next", "/generations/3", "/final" })
