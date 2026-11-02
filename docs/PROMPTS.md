@@ -475,4 +475,4 @@ The assistant started the API and browser UI locally for hands-on testing.
 and for final state, whenever we load a board, we make a separate request to get the final state, and basically we just do this the first time we load a new board as all subsequent states will have the same final state right?
 ```
 
-The assistant confirmed that one final state request covers a whole run. Loading a board does not ask for its final state. The first Next, Jump or Play asks once, and later steps reuse that answer because every board after it has the same final board and period. The request is only made again after an edit or a load starts a new run.
+The assistant confirmed that one final state request covers a whole run. Loading a board does not ask for its final state. The first Next, Jump or Play asks once, and later steps reuse that answer because every board after it has the same final board and period. The request is only made again after an edit or a load starts a new run. Checking this turned up a bug. Drawing on the canvas or resizing kept the old run, so the previous board's final state could be shown for the edited board. Every edit now starts a new run.
