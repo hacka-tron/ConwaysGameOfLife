@@ -396,3 +396,19 @@ also I want you to describe the cache access pattern used right now
 ```
 
 Finding a board's final state now saves the final state of every board the run stepped through, cycle members included. Each step also checks for a final state saved by an earlier run and stops there, so two boards whose futures meet only compute the shared part once. The assistant described the cache access pattern and added it to the architecture document. Thirteen tests were added and an independent review approved the change.
+
+### 49
+
+```text
+how does the cache get evicted?
+```
+
+The assistant explained that entries leave the in-memory cache in two ways. Saving a link removes the affected entries, and when the size limit is reached the cache trims itself back to 95% of the limit, least recently used first. LMDB itself never evicts anything.
+
+### 50
+
+```text
+also how much would it cost to save the whole board in memory
+```
+
+The assistant worked out the cost of storing every board a run passes through instead of only its final state record. At the default 256 x 256 limit that is about 8 KB per board against about 70 bytes, so roughly 120 times more space for the same run.
