@@ -549,3 +549,11 @@ ok i really like the recipe idea, could we use this so that we only store key bo
 ```
 
 The assistant laid out a design with full key boards for uploads, final boards and a checkpoint every K generations, recipes for every other board including the intermediate steps of jumps and final state runs, and skip links between checkpoints for fast jumps. It pointed out that loading a recipe still recomputes up to K generations, so recipes cap the recomputing rather than removing it, and asked the owner to choose the scope before building.
+
+### 68
+
+```text
+first explain this to me, and geneate an artifact so I understand how this will work. so essentially we are trading off some recomputing to save on storage right?
+```
+
+The assistant confirmed the trade. Recipes save about 60 times the storage at 256 x 256 and make every intermediate step loadable, in exchange for replaying up to K generations when a board is read. It published an interactive explainer where the checkpoint interval and the loaded generation can be changed to see the replay cost and the storage size.
