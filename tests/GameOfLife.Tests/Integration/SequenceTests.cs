@@ -51,8 +51,8 @@ public sealed class SequenceTests : IDisposable
         }
 
         // The saved chain reads back in one go, up to the length asked for or the last saved link.
-        Assert.Equal(ids.Skip(1).Take(3), (await store.GetChainAsync(id, 3, CancellationToken.None)).Select(b => b.Id));
-        Assert.Equal(ids.Skip(1), (await store.GetChainAsync(id, 50, CancellationToken.None)).Select(b => b.Id));
+        Assert.Equal(ids.Skip(1).Take(3), (await store.GetChainAsync(id, 3, CancellationToken.None)).Select(b => b.Board.Id));
+        Assert.Equal(ids.Skip(1), (await store.GetChainAsync(id, 50, CancellationToken.None)).Select(b => b.Board.Id));
     }
 
     [Fact]
@@ -66,7 +66,7 @@ public sealed class SequenceTests : IDisposable
 
         var chain = await factory.Services.GetRequiredService<IBoardStore>().GetChainAsync(horizontal.Id, 5, CancellationToken.None);
 
-        Assert.Equal([vertical.Id, horizontal.Id, vertical.Id, horizontal.Id, vertical.Id], chain.Select(b => b.Id));
+        Assert.Equal([vertical.Id, horizontal.Id, vertical.Id, horizontal.Id, vertical.Id], chain.Select(b => b.Board.Id));
     }
 
     [Fact]

@@ -57,15 +57,37 @@ public sealed class ConfigurationTests : IDisposable
         var glider = await (await client.PostAsJsonAsync("/boards", Upload(Patterns.GliderOn(20))))
             .Content.ReadFromJsonAsync<BoardResponse>();
 
-        var final = await client.GetAsync($"/boards/{glider!.Id}/final");
-        var farAhead = await client.GetAsync($"/boards/{glider.Id}/generations/6");
+        var farAhead = await client.GetAsync($"/boards/{glider!.Id}/generations/11");
+        var final = await client.GetAsync($"/boards/{glider.Id}/final");
         var withinLimit = await client.GetAsync($"/boards/{glider.Id}/generations/5");
 
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, farAhead.StatusCode);
         Assert.Equal(HttpStatusCode.UnprocessableEntity, final.StatusCode);
         var problem = await final.Content.ReadFromJsonAsync<ProblemDetails>();
         Assert.Contains("within 5 generations", problem!.Detail);
-        Assert.Equal(HttpStatusCode.UnprocessableEntity, farAhead.StatusCode);
         Assert.Equal(HttpStatusCode.OK, withinLimit.StatusCode);
+    }
+
+    [Fact]
+    public async Task ARunThatHitsTheStepLimitSavesItsProgressForLaterRequests()
+    {
+        using var factory = new ApiFactory(_storage.Path, new Dictionary<string, string>
+        {
+            ["GameOfLife:MaxSteps"] = "5",
+        });
+        var client = factory.CreateClient();
+        var glider = await (await client.PostAsJsonAsync("/boards", Upload(Patterns.GliderOn(20))))
+            .Content.ReadFromJsonAsync<BoardResponse>();
+
+        // The first request computes 5 generations and saves them. The second walks those 5 and computes 3 more.
+        var first = await client.GetAsync($"/boards/{glider!.Id}/generations/8");
+        var second = await client.GetAsync($"/boards/{glider.Id}/generations/8");
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, first.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, second.StatusCode);
+        var simulator = new GameOfLife.Core.LifeSimulator(new GameOfLife.Core.LifeEngine());
+        var expected = simulator.Advance(Patterns.Parse(Patterns.GliderOn(20)), 8, CancellationToken.None);
+        Assert.Equal(expected.Id, (await second.Content.ReadFromJsonAsync<BoardResponse>())!.Id);
     }
 
     [Fact]

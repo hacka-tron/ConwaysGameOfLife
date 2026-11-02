@@ -13,11 +13,14 @@ public sealed record BoardSequence(IReadOnlyList<Board> Boards, int? RepeatsFrom
 
 /// <summary>
 /// The four operations of the API. Results are stored as they are computed, so asking
-/// the same question about the same board twice only computes the answer once.
+/// the same question about the same board twice only computes the answer once. Every generation
+/// that gets computed is saved, small boards in full and large boards as recipes, as
+/// <see cref="BoardStoragePolicy"/> decides.
 /// </summary>
 public sealed class BoardService(
     IBoardStore store,
     LifeSimulator simulator,
+    BoardStoragePolicy storagePolicy,
     IOptions<GameOfLifeOptions> options,
     ILogger<BoardService> logger)
 {
@@ -43,7 +46,9 @@ public sealed class BoardService(
         }
 
         var next = simulator.Advance(record.Board, 1, cancellationToken);
-        await store.SaveChainAsync(id, [next], cancellationToken);
+        var chain = storagePolicy.StartChain(record.StepsFromKey);
+        chain.Add(next);
+        await store.SaveChainAsync(id, chain.Links, cancellationToken);
         return next;
     }
 
@@ -59,22 +64,25 @@ public sealed class BoardService(
         var saved = await store.GetChainAsync(id, count, cancellationToken);
         var generationOf = new Dictionary<string, int> { [id] = 0 };
         var boards = new List<Board>(count);
-        var computed = new List<Board>();
+        ChainBuilder? computed = null;
         string computedFrom = id;
         Board current = record.Board;
+        int currentStepsFromKey = record.StepsFromKey;
 
         for (int generation = 1; generation <= count; generation++)
         {
             Board next;
             if (generation <= saved.Count)
             {
-                next = saved[generation - 1];
+                next = saved[generation - 1].Board;
+                currentStepsFromKey = saved[generation - 1].StepsFromKey;
             }
             else
             {
                 // The saved chain ended here, so everything from this board onwards is computed.
-                if (computed.Count == 0)
+                if (computed is null)
                 {
+                    computed = storagePolicy.StartChain(currentStepsFromKey);
                     computedFrom = current.Id;
                 }
 
@@ -98,9 +106,9 @@ public sealed class BoardService(
 
         async Task SaveComputedAsync()
         {
-            if (computed.Count > 0)
+            if (computed is { Links.Count: > 0 })
             {
-                await store.SaveChainAsync(computedFrom, computed, cancellationToken);
+                await store.SaveChainAsync(computedFrom, computed.Links, cancellationToken);
             }
         }
     }
@@ -116,27 +124,39 @@ public sealed class BoardService(
         }
 
         var record = await GetRecordAsync(id, cancellationToken);
-        Board result;
         if (record.Final is { } final && generations >= final.Steps)
         {
             // Once a board has settled, only its position within the cycle matters.
             var finalBoard = await GetAsync(final.BoardId, cancellationToken);
             int offset = (int)((generations - final.Steps) % final.Period);
-            result = simulator.Advance(finalBoard, offset, cancellationToken);
+            var settled = simulator.Advance(finalBoard, offset, cancellationToken);
+            await store.AddAsync(settled, cancellationToken);
+            return settled;
         }
-        else
+
+        // Saved next links lead straight to boards that are already stored, so follow them first.
+        // Every board on them is stored in full or as a recipe, so nothing needs computing on the way.
+        var walk = await store.WalkAsync(id, (int)Math.Min(generations, MaxSteps), cancellationToken);
+        if (walk.Ids.Count >= generations)
         {
-            var run = await simulator.RunAsync(record.Board, generations, MaxSteps, FindKnownFinalAsync, cancellationToken)
-                ?? throw LimitExceeded(id);
-            if (run.Final is not null)
-            {
-                await SaveFinalsAsync(id, run, cancellationToken);
-            }
-
-            result = run.BoardAtTarget!;
+            return await GetAsync(walk.Ids[(int)generations - 1], cancellationToken);
         }
 
-        // Stored so the returned ID can be used in later requests.
+        if (walk.RepeatsFrom is int loopStart)
+        {
+            int period = walk.Ids.Count + 1 - loopStart;
+            long position = loopStart + (generations - loopStart) % period;
+            return await GetAsync(position == 0 ? id : walk.Ids[(int)position - 1], cancellationToken);
+        }
+
+        // Compute the rest from where the saved links end.
+        string fromId = walk.Ids.Count == 0 ? id : walk.Ids[^1];
+        var from = walk.Ids.Count == 0 ? record : await GetRecordAsync(fromId, cancellationToken);
+        var run = await RunAndSaveAsync(fromId, from, generations - walk.Ids.Count, cancellationToken)
+            ?? throw LimitExceeded(id);
+        var result = run.BoardAtTarget!;
+
+        // Stored so the returned ID can be used in later requests, unless the run already saved it.
         await store.AddAsync(result, cancellationToken);
         return result;
     }
@@ -150,10 +170,31 @@ public sealed class BoardService(
             return new FinalState(board, known.Steps, known.Period);
         }
 
-        var run = await simulator.RunAsync(record.Board, target: null, MaxSteps, FindKnownFinalAsync, cancellationToken)
-            ?? throw LimitExceeded(id);
-        await SaveFinalsAsync(id, run, cancellationToken);
+        var run = await RunAndSaveAsync(id, record, target: null, cancellationToken) ?? throw LimitExceeded(id);
         return run.Final!;
+    }
+
+    /// <summary>
+    /// Runs the simulator from a stored board and saves every generation it computed, with the next
+    /// links between them, even when the run stops at the step limit. Later requests can then load any
+    /// of those boards, or walk the links, instead of computing them again.
+    /// </summary>
+    private async Task<SimulationResult?> RunAndSaveAsync(
+        string id, BoardRecord record, long? target, CancellationToken cancellationToken)
+    {
+        var chain = storagePolicy.StartChain(record.StepsFromKey);
+        var run = await simulator.RunAsync(record.Board, target, MaxSteps, FindKnownFinalAsync, cancellationToken, chain.Add);
+        if (chain.Links.Count > 0)
+        {
+            await store.SaveChainAsync(id, chain.Links, cancellationToken);
+        }
+
+        if (run?.Final is not null)
+        {
+            await SaveFinalsAsync(id, run, cancellationToken);
+        }
+
+        return run;
     }
 
     /// <summary>

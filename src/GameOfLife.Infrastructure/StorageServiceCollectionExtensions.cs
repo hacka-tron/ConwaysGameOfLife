@@ -19,6 +19,11 @@ public static class StorageServiceCollectionExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
+        services.AddSingleton(provider =>
+        {
+            var settings = provider.GetRequiredService<IOptions<StorageOptions>>().Value;
+            return new BoardStoragePolicy(settings.KeyBoardInterval, settings.FullBoardMaxBytes);
+        });
         services.AddSingleton<LmdbBoardStore>();
         services.AddSingleton<IBoardStore>(provider => new CachedBoardStore(
             provider.GetRequiredService<LmdbBoardStore>(),

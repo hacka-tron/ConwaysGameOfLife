@@ -14,20 +14,27 @@ namespace GameOfLife.Infrastructure;
 /// <remarks>
 /// Keys and values:
 /// <list type="bullet">
-/// <item><c>board:{id}</c> holds the board in the form <see cref="BoardCodec"/> writes, compressed when that is smaller.</item>
+/// <item><c>board:{id}</c> holds a board stored in full, in the form <see cref="BoardCodec"/> writes.</item>
+/// <item><c>recipe:{id}</c> holds a recipe for a large board, the ID of a board stored in full and how many generations to step from it.</item>
 /// <item><c>next:{id}</c> holds the ID of the next generation.</item>
 /// <item><c>final:{id}</c> holds steps, period and the ID of the final board.</item>
 /// </list>
-/// Each operation is one short synchronous transaction. LMDB transactions must not span an
-/// <c>await</c>, and these calls take microseconds, so there is nothing to gain from doing so.
+/// Each board is stored either in full or as a recipe, as <see cref="BoardStoragePolicy"/> decides, and
+/// the two kinds have separate read and write paths below. Each operation is one short synchronous
+/// transaction. LMDB transactions must not span an <c>await</c>, and these calls take at most a few
+/// milliseconds, so there is nothing to gain from doing so.
 /// </remarks>
 public sealed class LmdbBoardStore : IBoardStore, IDisposable
 {
     private readonly LightningEnvironment _environment;
     private readonly LightningDatabase _database;
+    private readonly ILifeEngine _engine;
+    private readonly BoardStoragePolicy _policy;
 
-    public LmdbBoardStore(IOptions<StorageOptions> options)
+    public LmdbBoardStore(IOptions<StorageOptions> options, ILifeEngine engine, BoardStoragePolicy policy)
     {
+        _engine = engine;
+        _policy = policy;
         var settings = options.Value;
         Directory.CreateDirectory(settings.Path);
         _environment = new LightningEnvironment(settings.Path, new EnvironmentConfiguration { MapSize = settings.MaxSizeBytes });
@@ -45,55 +52,98 @@ public sealed class LmdbBoardStore : IBoardStore, IDisposable
     {
         cancellationToken.ThrowIfCancellationRequested();
         using var transaction = _environment.BeginTransaction(TransactionBeginFlags.ReadOnly);
-        if (!transaction.TryGet(_database, Key("board", id), out byte[]? boardValue))
+        if (ReadBoard(transaction, id, cancellationToken) is not { } stored)
         {
             return Task.FromResult<BoardRecord?>(null);
         }
 
-        string? nextId = transaction.TryGet(_database, Key("next", id), out byte[]? nextValue)
-            ? Encoding.ASCII.GetString(nextValue!)
-            : null;
+        string? nextId = ReadNextId(transaction, id);
         StoredFinalState? final = transaction.TryGet(_database, Key("final", id), out byte[]? finalValue)
             ? DecodeFinal(finalValue!)
             : null;
 
-        return Task.FromResult<BoardRecord?>(new BoardRecord(BoardCodec.Decode(boardValue!), nextId, final));
+        return Task.FromResult<BoardRecord?>(new BoardRecord(stored.Board, nextId, final, stored.StepsFromKey));
     }
 
-    public Task<IReadOnlyList<Board>> GetChainAsync(string fromId, int maxLength, CancellationToken cancellationToken)
+    public Task<IReadOnlyList<StoredBoard>> GetChainAsync(string fromId, int maxLength, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var chain = new List<Board>();
+        var chain = new List<StoredBoard>();
         using var transaction = _environment.BeginTransaction(TransactionBeginFlags.ReadOnly);
         string id = fromId;
-        while (chain.Count < maxLength
-            && transaction.TryGet(_database, Key("next", id), out byte[]? nextValue)
-            && transaction.TryGet(_database, Key("board", id = Encoding.ASCII.GetString(nextValue!)), out byte[]? boardValue))
+        while (chain.Count < maxLength && ReadNextId(transaction, id) is { } nextId)
         {
-            chain.Add(BoardCodec.Decode(boardValue!));
+            // A recipe board right after a board already rebuilt is one step on from it, which is much
+            // cheaper than replaying it from its key board.
+            StoredBoard? stored = chain.Count > 0 && !transaction.ContainsKey(_database, Key("board", nextId))
+                ? StepRecipeBoard(transaction, chain[^1].Board, nextId)
+                : ReadBoard(transaction, nextId, cancellationToken);
+            if (stored is null)
+            {
+                break;
+            }
+
+            chain.Add(stored);
+            id = nextId;
         }
 
-        return Task.FromResult<IReadOnlyList<Board>>(chain);
+        return Task.FromResult<IReadOnlyList<StoredBoard>>(chain);
+    }
+
+    public Task<ChainWalk> WalkAsync(string fromId, int maxLength, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var ids = new List<string>();
+        var generationOf = new Dictionary<string, int> { [fromId] = 0 };
+        using var transaction = _environment.BeginTransaction(TransactionBeginFlags.ReadOnly);
+        string id = fromId;
+        while (ids.Count < maxLength && ReadNextId(transaction, id) is { } nextId)
+        {
+            if (generationOf.TryGetValue(nextId, out int repeatsFrom))
+            {
+                return Task.FromResult(new ChainWalk(ids, repeatsFrom));
+            }
+
+            ids.Add(nextId);
+            generationOf.Add(nextId, ids.Count);
+            id = nextId;
+        }
+
+        return Task.FromResult(new ChainWalk(ids, null));
     }
 
     public Task<bool> AddAsync(Board board, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(Write(transaction => PutBoard(transaction, board)));
+        return Task.FromResult(Write(transaction =>
+            transaction.ContainsKey(_database, Key("recipe", board.Id))
+                ? false
+                : WriteFullBoard(transaction, board)));
     }
 
-    public Task SaveChainAsync(string fromId, IReadOnlyList<Board> chain, CancellationToken cancellationToken)
+    public Task SaveChainAsync(string fromId, IReadOnlyList<ChainLink> links, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         Write(transaction =>
         {
-            // Each board is written before the link to it, all in one commit.
+            // Recipes are written relative to the most recent board stored in full, starting from the
+            // board before the chain. Each board is written before the link to it, all in one commit.
+            var (keyId, stepsFromKey) = KeyOf(transaction, fromId);
             string previous = fromId;
-            foreach (var board in chain)
+            foreach (var link in links)
             {
-                PutBoard(transaction, board);
-                Put(transaction, Key("next", previous), Encoding.ASCII.GetBytes(board.Id));
-                previous = board.Id;
+                if (link.FullBoard is { } board)
+                {
+                    WriteFullBoard(transaction, board);
+                }
+                else
+                {
+                    WriteRecipe(transaction, link.BoardId, keyId, stepsFromKey + 1);
+                }
+
+                Put(transaction, Key("next", previous), Encoding.ASCII.GetBytes(link.BoardId));
+                (keyId, stepsFromKey) = KeyOf(transaction, link.BoardId);
+                previous = link.BoardId;
             }
 
             return true;
@@ -113,8 +163,9 @@ public sealed class LmdbBoardStore : IBoardStore, IDisposable
         cancellationToken.ThrowIfCancellationRequested();
         Write(transaction =>
         {
-            // The final board is written before anything points at it, in the same commit.
-            PutBoard(transaction, finalBoard);
+            // Final boards are always stored in full, because every jump past the final state starts
+            // from them. The final board is written before anything points at it, in the same commit.
+            WriteFullBoard(transaction, finalBoard);
             Put(transaction, Key("final", finalBoard.Id), EncodeFinal(finalBoard.Id, 0, period));
             foreach (var board in boards)
             {
@@ -138,23 +189,49 @@ public sealed class LmdbBoardStore : IBoardStore, IDisposable
         _environment.Dispose();
     }
 
-    private T Write<T>(Func<LightningTransaction, T> work)
+    // ------------------------------------------------------------------ Reading either kind
+
+    private StoredBoard? ReadBoard(LightningTransaction transaction, string id, CancellationToken cancellationToken)
     {
-        try
+        if (transaction.TryGet(_database, Key("board", id), out byte[]? value))
         {
-            using var transaction = _environment.BeginTransaction();
-            T result = work(transaction);
-            transaction.Commit().ThrowOnError();
-            return result;
+            return new StoredBoard(ReadFullBoard(value!), 0);
         }
-        catch (LightningException ex) when (ex.StatusCode == (int)MDBResultCode.MapFull)
+
+        if (transaction.TryGet(_database, Key("recipe", id), out byte[]? recipe))
         {
-            throw new StorageFullException(ex);
+            return ReadRecipeBoard(transaction, id, recipe!, cancellationToken);
         }
+
+        return null;
     }
 
+    private string? ReadNextId(LightningTransaction transaction, string id) =>
+        transaction.TryGet(_database, Key("next", id), out byte[]? value) ? Encoding.ASCII.GetString(value!) : null;
+
+    /// <summary>The board stored in full that later recipes in a chain replay from, and how far this board is from it.</summary>
+    private (string KeyId, int StepsFromKey) KeyOf(LightningTransaction transaction, string id)
+    {
+        if (transaction.ContainsKey(_database, Key("board", id)))
+        {
+            return (id, 0);
+        }
+
+        if (transaction.TryGet(_database, Key("recipe", id), out byte[]? recipe))
+        {
+            var (keyId, steps) = DecodeRecipe(recipe!);
+            return (keyId, steps);
+        }
+
+        throw new InvalidOperationException($"Board '{id}' is linked to but not stored.");
+    }
+
+    // ------------------------------------------------------------------ Boards stored in full
+
+    private static Board ReadFullBoard(byte[] value) => BoardCodec.Decode(value);
+
     /// <returns><c>true</c> if the board was new.</returns>
-    private bool PutBoard(LightningTransaction transaction, Board board)
+    private bool WriteFullBoard(LightningTransaction transaction, Board board)
     {
         byte[] key = Key("board", board.Id);
         byte[] value = BoardCodec.Encode(board);
@@ -175,6 +252,99 @@ public sealed class LmdbBoardStore : IBoardStore, IDisposable
 
         result.ThrowOnError();
         return true;
+    }
+
+    // ------------------------------------------------------------------ Boards stored as recipes
+
+    /// <summary>Rebuilds a recipe board by loading its key board and stepping it forward.</summary>
+    private StoredBoard ReadRecipeBoard(LightningTransaction transaction, string id, byte[] recipe, CancellationToken cancellationToken)
+    {
+        var (keyId, steps) = DecodeRecipe(recipe);
+        if (!transaction.TryGet(_database, Key("board", keyId), out byte[]? keyValue))
+        {
+            throw new InvalidDataException($"The key board '{keyId}' for recipe board '{id}' is not stored.");
+        }
+
+        var board = ReadFullBoard(keyValue!);
+        for (int i = 0; i < steps; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            board = _engine.Step(board);
+        }
+
+        return new StoredBoard(Verified(board, id), steps);
+    }
+
+    /// <summary>Rebuilds a recipe board from the board just before it, which is one step instead of a replay.</summary>
+    private StoredBoard? StepRecipeBoard(LightningTransaction transaction, Board previous, string id)
+    {
+        if (!transaction.TryGet(_database, Key("recipe", id), out byte[]? recipe))
+        {
+            return null;
+        }
+
+        return new StoredBoard(Verified(_engine.Step(previous), id), DecodeRecipe(recipe!).Steps);
+    }
+
+    /// <summary>
+    /// Writes a recipe unless the board is already stored in full or has a recipe at least as short.
+    /// Every recipe for an ID rebuilds the same board, so keeping the shortest only makes reads faster,
+    /// and it means a recipe written after this one in the chain is never further from its key board
+    /// than planned.
+    /// </summary>
+    private void WriteRecipe(LightningTransaction transaction, string id, string keyId, int steps)
+    {
+        if (steps >= _policy.KeyBoardInterval)
+        {
+            throw new InvalidOperationException(
+                $"Recipe for '{id}' would replay {steps} generations, more than the key board interval allows.");
+        }
+
+        if (transaction.ContainsKey(_database, Key("board", id)))
+        {
+            return;
+        }
+
+        byte[] key = Key("recipe", id);
+        if (transaction.TryGet(_database, key, out byte[]? existing) && DecodeRecipe(existing!).Steps <= steps)
+        {
+            return;
+        }
+
+        Put(transaction, key, EncodeRecipe(keyId, steps));
+    }
+
+    private static Board Verified(Board rebuilt, string id) =>
+        rebuilt.Id == id
+            ? rebuilt
+            : throw new InvalidDataException($"The recipe for board '{id}' rebuilt a different board.");
+
+    private static byte[] EncodeRecipe(string keyId, int steps)
+    {
+        var value = new byte[4 + keyId.Length];
+        BinaryPrimitives.WriteInt32LittleEndian(value, steps);
+        Encoding.ASCII.GetBytes(keyId, value.AsSpan(4));
+        return value;
+    }
+
+    private static (string KeyId, int Steps) DecodeRecipe(byte[] value) =>
+        (Encoding.ASCII.GetString(value, 4, value.Length - 4), BinaryPrimitives.ReadInt32LittleEndian(value));
+
+    // ------------------------------------------------------------------ Shared helpers
+
+    private T Write<T>(Func<LightningTransaction, T> work)
+    {
+        try
+        {
+            using var transaction = _environment.BeginTransaction();
+            T result = work(transaction);
+            transaction.Commit().ThrowOnError();
+            return result;
+        }
+        catch (LightningException ex) when (ex.StatusCode == (int)MDBResultCode.MapFull)
+        {
+            throw new StorageFullException(ex);
+        }
     }
 
     private void Put(LightningTransaction transaction, byte[] key, byte[] value) =>

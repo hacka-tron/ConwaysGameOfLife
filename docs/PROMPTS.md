@@ -605,3 +605,25 @@ also most boards arent 256x256 that is the cap, most are much smaller, like 32*4
 ```
 
 The assistant measured random 32 x 48 boards. They settle in about 300 generations, step in about 0.005 ms, and store in about 120 bytes compressed, which is already close to the size of a recipe. It kept 64 generations as the default interval, since even a 63-generation replay takes about 0.3 ms at that size. It pointed out that recipes only halve storage for boards this small, and recommended storing boards under about 1 KB compressed in full and using recipes only for larger boards.
+
+### 75
+
+```text
+Ok so the strategy will be:
+for smaller boards, store these compressed boards in full as they are small
+for larger baoards, use recipes and save the board at key intervals, that way this becomes less memory to manage for both cold storage and memory
+```
+
+
+### 76
+
+```text
+also make this classification clear in code so there are two clear paths, one for fully stored boards, one for recipe based boards
+```
+
+### 77
+
+```text
+also can you describe how many boards will be able to be stored with this new optimization
+```
+
