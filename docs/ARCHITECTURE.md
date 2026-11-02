@@ -36,6 +36,10 @@ Each step of a run also checks whether the current board's final state is alread
 
 The extra check costs one key lookup per generation. On the random 256 x 256 board below it made no measurable difference. That run saved about 2,400 final state records, and the whole database stayed under 1 MB.
 
+### Kinds of final state
+
+A board that settles is `extinct` when every cell has died, a `still-life` when live cells remain but never change, and an `oscillator` when it repeats a longer cycle. An empty board is a period 1 cycle like a still life, so the kind is decided by whether any cell is alive.
+
 ### The final state of an oscillator
 
 A cycle has several boards, so "the final state" needs one fixed answer. It is the cycle member with the smallest ID. Every board that leads into the same cycle then reports the same final board, which keeps the cache consistent. `steps` is how many generations it takes to first reach that board.

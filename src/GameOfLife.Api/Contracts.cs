@@ -54,14 +54,19 @@ public sealed record BoardSequenceResponse(BoardResponse[] Boards, int? RepeatsF
 /// <param name="Board">The settled board. For an oscillator, the cycle member with the smallest ID.</param>
 /// <param name="Steps">Generations from the requested board until it first reaches <paramref name="Board"/>.</param>
 /// <param name="Period">1 if the board no longer changes, otherwise the length of the cycle it repeats.</param>
-/// <param name="Kind">"still-life" or "oscillator".</param>
+/// <param name="Kind">"extinct" if every cell died, "still-life" if live cells remain but never change, or "oscillator".</param>
 public sealed record FinalStateResponse(BoardResponse Board, int Steps, int Period, string Kind)
 {
     public static FinalStateResponse From(FinalState final) => new(
         BoardResponse.From(final.Board),
         final.Steps,
         final.Period,
-        final.Period == 1 ? "still-life" : "oscillator");
+        final.Kind switch
+        {
+            FinalKind.Extinct => "extinct",
+            FinalKind.StillLife => "still-life",
+            _ => "oscillator",
+        });
 }
 
 /// <param name="MaxWidth">Widest board accepted.</param>

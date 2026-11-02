@@ -4,6 +4,23 @@ namespace GameOfLife.Tests.Unit;
 
 public class BoardTests
 {
+    [Theory]
+    [InlineData(new[] { "...", "...", "..." }, true)]
+    [InlineData(new[] { "...", "...", "..#" }, false)]
+    [InlineData(new[] { "#.." }, false)]
+    public void IsEmptyOnlyWhenNoCellIsAlive(string[] rows, bool expected)
+    {
+        Assert.Equal(expected, Patterns.Parse(rows).IsEmpty);
+    }
+
+    [Theory]
+    [InlineData(new[] { "...", "...", "..." }, FinalKind.Extinct)]
+    [InlineData(new[] { "....", ".##.", ".##.", "...." }, FinalKind.StillLife)]
+    public void FinalKindTellsExtinctionFromAStillLife(string[] rows, FinalKind expected)
+    {
+        Assert.Equal(expected, new FinalState(Patterns.Parse(rows), Steps: 0, Period: 1).Kind);
+    }
+
     [Fact]
     public void SameCellsHaveSameId()
     {

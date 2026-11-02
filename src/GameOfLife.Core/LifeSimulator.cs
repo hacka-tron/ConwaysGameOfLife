@@ -1,14 +1,31 @@
 namespace GameOfLife.Core;
 
+/// <summary>What kind of state a board settles into.</summary>
+public enum FinalKind
+{
+    /// <summary>Every cell has died. The empty board never changes again.</summary>
+    Extinct,
+
+    /// <summary>Live cells remain and the board no longer changes.</summary>
+    StillLife,
+
+    /// <summary>The board repeats a cycle longer than one generation.</summary>
+    Oscillator,
+}
+
 /// <summary>
-/// Where a board ends up. Every board eventually repeats, either as a still life (period 1)
-/// or an oscillator. <see cref="Board"/> is the cycle member with the smallest ID, so every
-/// board that leads into the same cycle reports the same final state.
+/// Where a board ends up. Every board eventually repeats, either by dying out, as a still life
+/// (period 1) or as an oscillator. <see cref="Board"/> is the cycle member with the smallest ID, so
+/// every board that leads into the same cycle reports the same final state.
 /// </summary>
 /// <param name="Board">The canonical member of the cycle.</param>
 /// <param name="Steps">Generations from the starting board until it first reaches <paramref name="Board"/>.</param>
 /// <param name="Period">Length of the cycle. 1 means the board no longer changes.</param>
-public sealed record FinalState(Board Board, int Steps, int Period);
+public sealed record FinalState(Board Board, int Steps, int Period)
+{
+    /// <summary>An empty final board is extinct. Otherwise period 1 is a still life and longer is an oscillator.</summary>
+    public FinalKind Kind => Board.IsEmpty ? FinalKind.Extinct : Period == 1 ? FinalKind.StillLife : FinalKind.Oscillator;
+}
 
 /// <summary>How many generations a board takes to first reach its final board.</summary>
 public readonly record struct BoardSteps(string BoardId, int Steps);

@@ -28,7 +28,7 @@ With Homebrew's `dotnet@8` on macOS, add `/opt/homebrew/opt/dotnet@8/bin` to `PA
 | `GET` | `/boards/{id}/next` | The next generation, with its own ID. |
 | `GET` | `/boards/{id}/sequence?count={n}` | Up to `n` consecutive generations for playback, and where the sequence loops back to once it repeats. |
 | `GET` | `/boards/{id}/generations/{n}` | The board after `n` generations, with its own ID. |
-| `GET` | `/boards/{id}/final` | The state the board settles into, how many generations it took, and the cycle length. |
+| `GET` | `/boards/{id}/final` | The state the board settles into, how many generations it took, the cycle length, and its kind: `extinct`, `still-life` or `oscillator`. |
 | `GET` | `/settings` | The size, step and playback limits, and the edge rule used when an upload does not name one. |
 | `GET` | `/health` | `Healthy` when storage is reachable. |
 

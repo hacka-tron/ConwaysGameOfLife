@@ -898,7 +898,7 @@ function nextGeneration() {
     setCurrent(result.data, { gen: s.gen === null ? null : s.gen + 1n });
     showFinalIfReached();
     if (result.data.id === s.id) {
-      showInfo(el.opsMsg, 'The next generation is identical, so this board is a still life.');
+      showInfo(el.opsMsg, settledMessage());
     }
   });
 }
@@ -1007,13 +1007,26 @@ function showFinalIfReached() {
   if (reached) showFinal(run.final, run.fromId);
 }
 
+// Shown when the next generation is the same board, which is either an empty board or a still life.
+function settledMessage() {
+  return population(state.cells) === 0
+    ? 'Every cell has died, so the board stays empty from here on.'
+    : 'The next generation is identical, so this board is a still life.';
+}
+
 function showFinal(data, fromId) {
-  const oscillator = data.kind === 'oscillator' || (data.kind !== 'still-life' && data.period > 1);
+  const extinct = data.kind === 'extinct';
+  const oscillator = !extinct && (data.kind === 'oscillator' || (data.kind !== 'still-life' && data.period > 1));
   const steps = BigInt(data.steps);
-  el.finalKind.textContent = oscillator ? `Oscillator with period ${data.period}` : 'Still life';
+  el.finalKind.textContent = extinct ? 'Extinct' : oscillator ? `Oscillator with period ${data.period}` : 'Still life';
 
   let summary;
-  if (oscillator) {
+  if (extinct) {
+    summary =
+      steps === 0n
+        ? 'The board is empty, so nothing will ever live on it.'
+        : `Every cell has died after ${plural(steps, 'generation', 'generations')}.`;
+  } else if (oscillator) {
     summary =
       steps === 0n
         ? `The board is already in a cycle that repeats every ${plural(data.period, 'generation', 'generations')}.`
@@ -1196,7 +1209,7 @@ function playStep() {
   const next = nextBuffered(pb);
   if (next) {
     if (next.id === s.id) {
-      stopPlay('The next generation has the same ID as this one, so the board is a still life. Playback stopped.');
+      stopPlay(`${settledMessage()} Playback stopped.`);
       return;
     }
     if (pb.waitShown) {
