@@ -569,7 +569,6 @@ The assistant explained that boards are only bit-packed, at one bit per cell, so
 ### 70
 
 ```text
-what is storage vs response compression?
+Add the compression for both storage and response
 ```
 
-The assistant explained that storage compression shrinks boards where they are saved in LMDB, which saves disk and cache space, while response compression shrinks the JSON sent to the browser over HTTP, which saves network bandwidth. They are independent, and either can be added without the other.

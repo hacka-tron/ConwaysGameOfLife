@@ -207,6 +207,21 @@ public sealed class BoardsApiTests : IDisposable
         }
     }
 
+    [Theory]
+    [InlineData("br")]
+    [InlineData("gzip")]
+    public async Task ResponsesAreCompressedWhenTheClientAcceptsIt(string encoding)
+    {
+        var glider = await UploadAsync(Patterns.GliderOn(64));
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"/boards/{glider.Id}");
+        request.Headers.AcceptEncoding.ParseAdd(encoding);
+
+        using var response = await _client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal([encoding], response.Content.Headers.ContentEncoding);
+    }
+
     [Fact]
     public async Task HealthCheckReportsHealthy()
     {

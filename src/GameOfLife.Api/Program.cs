@@ -1,7 +1,9 @@
+using System.IO.Compression;
 using System.Reflection;
 using GameOfLife.Api;
 using GameOfLife.Core;
 using GameOfLife.Infrastructure;
+using Microsoft.AspNetCore.ResponseCompression;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -21,6 +23,18 @@ builder.Services.AddScoped<BoardService>();
 builder.Services.AddSingleton<PlaybackRateLimiter>();
 builder.Services.AddBoardStorage(builder.Configuration);
 
+// Board JSON is mostly repeated 0s, so a 256 x 256 board shrinks from about 130 KB to about 10 KB.
+// Responses hold no secrets or cookies, so compressing over HTTPS carries no BREACH risk here.
+builder.Services.AddResponseCompression(compression =>
+{
+    compression.EnableForHttps = true;
+    compression.Providers.Add<BrotliCompressionProvider>();
+    compression.Providers.Add<GzipCompressionProvider>();
+    compression.MimeTypes = ResponseCompressionDefaults.MimeTypes.Append("application/problem+json");
+});
+builder.Services.Configure<BrotliCompressionProviderOptions>(options => options.Level = CompressionLevel.Fastest);
+builder.Services.Configure<GzipCompressionProviderOptions>(options => options.Level = CompressionLevel.Fastest);
+
 builder.Services.AddControllers();
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<BoardExceptionHandler>();
@@ -32,6 +46,7 @@ var app = builder.Build();
 
 app.Services.InitializeBoardStorage();
 
+app.UseResponseCompression();
 app.UseExceptionHandler();
 app.UseStatusCodePages();
 

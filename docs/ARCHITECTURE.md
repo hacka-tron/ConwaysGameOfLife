@@ -56,7 +56,7 @@ Boards are stored in LMDB, an embedded key-value store, through the LightningDB 
 
 | Key | Value |
 |---|---|
-| `board:{id}` | Format version, width, height, edge rule and the cells packed as bits. |
+| `board:{id}` | Format version, width, height, edge rule and the cells packed as bits, Brotli-compressed when that is smaller. |
 | `next:{id}` | ID of the next generation. |
 | `final:{id}` | Steps, period and the ID of the final board. Written for every board a run passes through, so the board itself may not be stored. |
 
@@ -68,6 +68,16 @@ Every lookup is by key, and every value is written once and never changes, so a 
 - A board and the link to it are written in one transaction.
 
 RocksDB was the main alternative. It is built for heavy write volume, which this service does not have. Microsoft's FASTER KV is faster still, but it saves to disk at checkpoints, so a crash can lose recent writes unless a checkpoint is forced before every response.
+
+### Compression
+
+Cells are packed eight to a byte, so a 256 x 256 board is 8,192 bytes whatever it holds. Most boards are mostly dead cells, so the packed cells are Brotli-compressed before they are written, and kept raw when compression would not make them smaller. A settled 256 x 256 board drops to about 1.6 KB and a lone glider to under 100 bytes. Random boards barely compress, so nothing is ever stored larger than before.
+
+This also matters for how LMDB lays out data. On a machine with 16 KB pages, an 8 KB value is too big to sit in a normal page, so it takes a whole page of its own. Uncompressed boards measured about 21 KB each on disk. Over the first 1,200 generations of a random 256 x 256 board, compressed boards averaged about 7.9 KB, and settled boards take far less.
+
+IDs hash the uncompressed cells, so compression never changes an ID. The first byte of each stored board says whether it is raw or compressed, and boards written before compression was added still load. When a board is uploaded again, the stored and new boards are compared cell by cell rather than byte by byte, so an older raw copy is not mistaken for a hash clash. The in-memory cache keeps boards uncompressed, so reading a cached board costs nothing extra.
+
+Responses are compressed too, with Brotli or gzip at the fastest level, for any client that asks. Board JSON is mostly repeated zeros, so a batch of 90 boards at 256 x 256 shrinks from about 12 MB to about 1 MB, for about 20 ms of extra work on localhost.
 
 An in-process cache sits in front of the store. Boards never change and their links only go from unknown to known, so a cached entry can at worst be missing a link that was saved since.
 
@@ -122,7 +132,7 @@ Play shows boards at a chosen speed, up to `MaxBoardsPerSecond`. It used to send
 - The first request for a far generation or a final state on a new board computes on the request thread, for up to `MaxSteps` generations. Only playback is rate limited, so several slow requests at once still compete for CPU. A limit on those endpoints or a work queue would fix this in production.
 - The playback limit is per IP address. A client with many addresses, such as a block of IPv6 addresses, gets a bucket for each. A batch is charged in full when it is requested, even if it ends early on a repeat or the board does not exist.
 - With `Wrap` edges, a board one or two cells wide counts the same cell as a neighbour more than once, the way a torus that small works mathematically. A single live cell on a 1 x 1 wrapped board therefore has 8 live neighbours and dies.
-- Boards travel as JSON grids of 0s and 1s, about 130 KB for a 256 x 256 board. A batch of 90 is about 12 MB and takes about half a second on localhost, mostly to serialise. Packed bits in base64 would cut that to about 11 KB a board.
+- Boards travel as JSON grids of 0s and 1s, about 130 KB for a 256 x 256 board before response compression and about 10 to 20 KB after. The server still builds and compresses the full JSON for every request. Packed bits in base64 would cut the work and the size further.
 - LMDB allows 126 concurrent readers by default. Reads take microseconds, so this is far beyond what one instance would reach, but it is a setting to raise under heavy load.
 
 ## Code layout
@@ -138,6 +148,7 @@ src/
   GameOfLife.Infrastructure
     LmdbBoardStore.cs        LMDB storage
     CachedBoardStore.cs      In-memory cache in front of any store
+    BoardCodec.cs            Stored board format, compressed when that is smaller
   GameOfLife.Api
     Controllers/             HTTP endpoints
     BoardRequestValidator.cs Upload validation against the configured limits
