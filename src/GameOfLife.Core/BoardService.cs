@@ -123,8 +123,9 @@ public sealed class BoardService(
                 : await GetNextAsync(id, cancellationToken);
         }
 
-        var record = await GetRecordAsync(id, cancellationToken);
-        if (record.Final is { } final && generations >= final.Steps)
+        // Only the final state record is needed here, so the starting board is not rebuilt yet. For a large
+        // board stored as a recipe, that saves replaying it when the answer comes from saved links.
+        if (await store.GetFinalAsync(id, cancellationToken) is { } final && generations >= final.Steps)
         {
             // Once a board has settled, only its position within the cycle matters.
             var finalBoard = await GetAsync(final.BoardId, cancellationToken);
@@ -149,11 +150,24 @@ public sealed class BoardService(
             return await GetAsync(position == 0 ? id : walk.Ids[(int)position - 1], cancellationToken);
         }
 
-        // Compute the rest from where the saved links end.
-        string fromId = walk.Ids.Count == 0 ? id : walk.Ids[^1];
-        var from = walk.Ids.Count == 0 ? record : await GetRecordAsync(fromId, cancellationToken);
-        var run = await RunAndSaveAsync(fromId, from, generations - walk.Ids.Count, cancellationToken)
-            ?? throw LimitExceeded(id);
+        // Compute the rest from where the saved links end. The generations walked count against the step
+        // limit, so whether a request succeeds never depends on what earlier requests happened to save.
+        // If the shortcut cannot finish within what is left, run from the start exactly as if nothing
+        // were saved, which gives the same answer the endpoint has always given.
+        SimulationResult? run = null;
+        if (walk.Ids.Count > 0)
+        {
+            string fromId = walk.Ids[^1];
+            var from = await GetRecordAsync(fromId, cancellationToken);
+            run = await RunAndSaveAsync(fromId, from, generations - walk.Ids.Count, MaxSteps - walk.Ids.Count, cancellationToken);
+        }
+
+        if (run is null)
+        {
+            var record = await GetRecordAsync(id, cancellationToken);
+            run = await RunAndSaveAsync(id, record, generations, MaxSteps, cancellationToken) ?? throw LimitExceeded(id);
+        }
+
         var result = run.BoardAtTarget!;
 
         // Stored so the returned ID can be used in later requests, unless the run already saved it.
@@ -170,20 +184,20 @@ public sealed class BoardService(
             return new FinalState(board, known.Steps, known.Period);
         }
 
-        var run = await RunAndSaveAsync(id, record, target: null, cancellationToken) ?? throw LimitExceeded(id);
+        var run = await RunAndSaveAsync(id, record, target: null, MaxSteps, cancellationToken) ?? throw LimitExceeded(id);
         return run.Final!;
     }
 
     /// <summary>
-    /// Runs the simulator from a stored board and saves every generation it computed, with the next
-    /// links between them, even when the run stops at the step limit. Later requests can then load any
-    /// of those boards, or walk the links, instead of computing them again.
+    /// Runs the simulator from a stored board for at most <paramref name="maxSteps"/> generations and saves
+    /// every generation it computed, with the next links between them, even when the run stops at the
+    /// limit. Later requests can then load any of those boards, or walk the links, instead of computing them.
     /// </summary>
     private async Task<SimulationResult?> RunAndSaveAsync(
-        string id, BoardRecord record, long? target, CancellationToken cancellationToken)
+        string id, BoardRecord record, long? target, int maxSteps, CancellationToken cancellationToken)
     {
         var chain = storagePolicy.StartChain(record.StepsFromKey);
-        var run = await simulator.RunAsync(record.Board, target, MaxSteps, FindKnownFinalAsync, cancellationToken, chain.Add);
+        var run = await simulator.RunAsync(record.Board, target, maxSteps, FindKnownFinalAsync, cancellationToken, chain.Add);
         if (chain.Links.Count > 0)
         {
             await store.SaveChainAsync(id, chain.Links, cancellationToken);

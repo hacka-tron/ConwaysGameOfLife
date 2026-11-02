@@ -64,9 +64,17 @@ public sealed class ChainBuilder
     /// <summary>Generations beyond this are not saved, so one request never holds more than this many links.</summary>
     public const int MaxLinks = 20_000;
 
+    /// <summary>
+    /// Generations beyond this much held board data are not saved either, so a request never holds more
+    /// than about this many bytes of full boards, whatever the size settings.
+    /// </summary>
+    public const long MaxHeldBytes = 32L * 1024 * 1024;
+
     private readonly BoardStoragePolicy _policy;
     private readonly List<ChainLink> _links = [];
     private int _stepsFromKey;
+    private long _heldBytes;
+    private bool _full;
 
     internal ChainBuilder(BoardStoragePolicy policy, int stepsFromKey)
     {
@@ -79,7 +87,7 @@ public sealed class ChainBuilder
     /// <summary>Adds the next generation after the last one added, or after the starting board.</summary>
     public void Add(Board board)
     {
-        if (_links.Count >= MaxLinks)
+        if (_full || _links.Count >= MaxLinks)
         {
             return;
         }
@@ -88,6 +96,14 @@ public sealed class ChainBuilder
             || _stepsFromKey + 1 >= _policy.KeyBoardInterval;
         if (storeInFull)
         {
+            if (_heldBytes + board.PackedCells.Length > MaxHeldBytes)
+            {
+                // The saved chain stays a consistent prefix. Nothing from this board on is saved.
+                _full = true;
+                return;
+            }
+
+            _heldBytes += board.PackedCells.Length;
             _links.Add(new ChainLink(board.Id, board));
             _stepsFromKey = 0;
         }

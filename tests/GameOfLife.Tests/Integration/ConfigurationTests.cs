@@ -68,8 +68,32 @@ public sealed class ConfigurationTests : IDisposable
         Assert.Equal(HttpStatusCode.OK, withinLimit.StatusCode);
     }
 
+    [Theory]
+    [InlineData(30)]
+    [InlineData(50)]
+    public async Task SavedProgressNeverChangesWhetherAJumpSucceeds(int generations)
+    {
+        // A glider on a wrapped 16 x 16 board repeats every 64 generations, which is past the limit of 20.
+        using var factory = new ApiFactory(_storage.Path, new Dictionary<string, string>
+        {
+            ["GameOfLife:MaxSteps"] = "20",
+        });
+        var client = factory.CreateClient();
+        var glider = await (await client.PostAsJsonAsync("/boards", Upload(Patterns.GliderOn(16)) with { EdgeMode = "wrap" }))
+            .Content.ReadFromJsonAsync<BoardResponse>();
+
+        // Each failed request saves the generations it computed. Asking again must still fail.
+        var statuses = new List<HttpStatusCode>();
+        for (int i = 0; i < 4; i++)
+        {
+            statuses.Add((await client.GetAsync($"/boards/{glider!.Id}/generations/{generations}")).StatusCode);
+        }
+
+        Assert.All(statuses, status => Assert.Equal(HttpStatusCode.UnprocessableEntity, status));
+    }
+
     [Fact]
-    public async Task ARunThatHitsTheStepLimitSavesItsProgressForLaterRequests()
+    public async Task ARunThatHitsTheStepLimitStillSavesItsBoards()
     {
         using var factory = new ApiFactory(_storage.Path, new Dictionary<string, string>
         {
@@ -79,15 +103,12 @@ public sealed class ConfigurationTests : IDisposable
         var glider = await (await client.PostAsJsonAsync("/boards", Upload(Patterns.GliderOn(20))))
             .Content.ReadFromJsonAsync<BoardResponse>();
 
-        // The first request computes 5 generations and saves them. The second walks those 5 and computes 3 more.
-        var first = await client.GetAsync($"/boards/{glider!.Id}/generations/8");
-        var second = await client.GetAsync($"/boards/{glider.Id}/generations/8");
+        var failed = await client.GetAsync($"/boards/{glider!.Id}/generations/8");
 
-        Assert.Equal(HttpStatusCode.UnprocessableEntity, first.StatusCode);
-        Assert.Equal(HttpStatusCode.OK, second.StatusCode);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, failed.StatusCode);
         var simulator = new GameOfLife.Core.LifeSimulator(new GameOfLife.Core.LifeEngine());
-        var expected = simulator.Advance(Patterns.Parse(Patterns.GliderOn(20)), 8, CancellationToken.None);
-        Assert.Equal(expected.Id, (await second.Content.ReadFromJsonAsync<BoardResponse>())!.Id);
+        var fifth = simulator.Advance(Patterns.Parse(Patterns.GliderOn(20)), 5, CancellationToken.None);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"/boards/{fifth.Id}")).StatusCode);
     }
 
     [Fact]

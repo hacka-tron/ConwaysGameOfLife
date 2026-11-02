@@ -25,9 +25,10 @@ The ID keeps the first 128 bits of the hash and writes them as 26 lowercase char
 Every board has exactly one next generation, so stored boards form a graph of next links that fills in as requests arrive. Results are saved when first computed.
 
 - **Next** follows the stored link if there is one. Otherwise it computes one generation and stores the new board and the link together.
-- **Final** steps forward until a board's ID repeats or it reaches a board whose final state is already known. A still life repeats after one step and an oscillator after its period. Every board on the way is saved with its next link and its final state, so asking about the starting board or any board after it is a single lookup.
+- **Final** steps forward until a board's ID repeats or it reaches a board whose final state is already known. A still life repeats after one step and an oscillator after its period. Every board on the way is saved with its next link and its final state, so asking about the starting board or any board after it needs no new simulation. A board stored as a recipe still replays up to 63 generations when it is loaded.
 - **N ahead** first follows saved next links, which costs microseconds per generation and computes nothing. If they reach generation N, or loop back into a cycle, the answer is a stored board. Otherwise it steps forward from where the links end. If the final state turns up first, any later generation follows from arithmetic on the cycle. So asking a settled board for generation 10<sup>18</sup> takes milliseconds.
-- **Every computed generation is saved**, including when a run stops at `MaxSteps`. A later request walks the saved part and continues from there, so a long run can be finished over several requests.
+- **The step limit does not depend on history.** Generations walked along saved links count against `MaxSteps` just like computed ones, and when the shortcut cannot finish within what is left, the request runs from the start as if nothing were saved. So a request that fails with 422 fails the same way every time, and saved links only make it cheaper.
+- **Every computed generation is saved**, including when a run stops at `MaxSteps`, so those boards can be loaded later by ID.
 
 ### Final states for every board on the way
 
@@ -45,7 +46,7 @@ A board that settles is `extinct` when every cell has died, a `still-life` when 
 
 A cycle has several boards, so "the final state" needs one fixed answer. It is the cycle member with the smallest ID. Every board that leads into the same cycle then reports the same final board, which keeps the cache consistent. `steps` is how many generations it takes to first reach that board.
 
-Every board a run steps through is saved, in full or as a recipe as described under Storage, so any of them can be loaded later by ID. A single request saves at most 20,000 generations, which keeps its memory bounded.
+Every board a run steps through is saved, in full or as a recipe as described under Storage, so any of them can be loaded later by ID. A single request saves at most 20,000 generations and 32 MB of full boards, which keeps its memory bounded.
 
 ## Edge rules
 
@@ -62,7 +63,7 @@ Boards are stored in LMDB, an embedded key-value store, through the LightningDB 
 | `next:{id}` | ID of the next generation. |
 | `final:{id}` | Steps, period and the ID of the final board. Written for every board a run passes through, so the board itself may not be stored. |
 
-Every lookup is by key, and every value is written once and never changes, so a key-value store fits better than a relational database. LMDB was chosen for four reasons.
+Every lookup is by key, and almost every value is written once and never changes, so a key-value store fits better than a relational database. The one exception is a recipe, which can be replaced by a shorter one for the same board. LMDB was chosen for four reasons.
 
 - Each commit is flushed to disk before it returns, and LMDB never overwrites live data. A crash cannot lose or corrupt committed boards, and there is no recovery step on startup.
 - Reads are lock-free from memory-mapped pages, which suits data that is written once and read many times.
@@ -76,7 +77,7 @@ RocksDB was the main alternative. It is built for heavy write volume, which this
 `BoardStoragePolicy` sorts every board into one of two kinds by size, and the store has a separate read and write path for each.
 
 - **Stored in full.** Boards whose packed cells fit in `Storage:FullBoardMaxBytes`, 1,024 bytes by default, which covers boards of up to 8,192 cells such as 32 x 48 or 64 x 64. A random 32 x 48 board compresses to about 120 bytes, close to the size of a recipe, so a recipe would save little. Reading one is a single lookup.
-- **Stored as a recipe.** Larger boards keep their full cells only at key boards. Those are uploads, final boards and one board every `Storage:KeyBoardInterval` generations along a chain, 64 by default. Every other board is a recipe that names its key board and how many generations to step from it. Reading one loads the key board and replays at most 63 generations, about 15 ms at 256 x 256 since one generation takes about 0.24 ms. Reading the next board in a chain is a single step from the one before. The rebuilt board's ID is checked against the requested ID, so a bad recipe fails loudly instead of returning the wrong board.
+- **Stored as a recipe.** Larger boards keep their full cells only at key boards. Those are uploads, final boards and one board every `Storage:KeyBoardInterval` generations along a chain, 64 by default. An upload of a board that already has a recipe keeps the recipe, since the board can already be loaded. Every other board is a recipe that names its key board and how many generations to step from it. Reading one loads the key board and replays at most 63 generations, about 15 ms at 256 x 256 since one generation takes about 0.24 ms. Reading the next board in a chain is a single step from the one before. The rebuilt board's ID is checked against the requested ID, so a bad recipe fails loudly instead of returning the wrong board.
 
 A large board can have more than one valid recipe, from different chains. Every recipe for an ID rebuilds the same board, so the store keeps the shortest one it has seen. That also guarantees a recipe never replays further than the interval allows. The rest of the store keeps the rule that every value is fully determined by its key.
 
@@ -158,6 +159,8 @@ Play shows boards at a chosen speed, up to `MaxBoardsPerSecond`. It used to send
 - The playback limit is per IP address. A client with many addresses, such as a block of IPv6 addresses, gets a bucket for each. A batch is charged in full when it is requested, even if it ends early on a repeat or the board does not exist.
 - With `Wrap` edges, a board one or two cells wide counts the same cell as a neighbour more than once, the way a torus that small works mathematically. A single live cell on a 1 x 1 wrapped board therefore has 8 live neighbours and dies.
 - Boards travel as JSON grids of 0s and 1s, about 130 KB for a 256 x 256 board before response compression and about 10 to 20 KB after. The server still builds and compresses the full JSON for every request. Packed bits in base64 would cut the work and the size further.
+- Loading a board stored as a recipe replays up to 63 generations, about 15 ms at 256 x 256, and `GET /boards/{id}` is not rate limited. A client that loads many different recipe boards, more than the cache holds, makes the server do that replay each time. A rate limit on reads would bound it.
+- One request saves at most 20,000 generations and at most 32 MB of full boards, so a run longer than that saves only its first part. Final state records are still written for every board on the run.
 - LMDB allows 126 concurrent readers by default. Reads take microseconds, so this is far beyond what one instance would reach, but it is a setting to raise under heavy load.
 
 ## Code layout
@@ -188,5 +191,5 @@ tests/
 ## What I would do next
 
 - **Faster generations.** Packing 64 cells into each machine word lets one step compute many cells at once. Hashlife caches the future of repeated regions and suits very large patterns.
-- **Resume final states too.** A jump that hits the step limit already continues from saved progress on the next request. Find final state could do the same by walking the saved links before it steps.
+- **Resume long runs.** Every generation a run computes is already saved, even when it stops at the step limit. An opt-in "continue" request could walk that saved progress and keep going, while the normal endpoints keep their fixed step limit.
 - **Operations.** Rate limiting, metrics, a container image, and a retention policy for boards nobody has requested in a long time.
