@@ -25,14 +25,22 @@ The ID keeps the first 128 bits of the hash and writes them as 26 lowercase char
 Every board has exactly one next generation, so stored boards form a graph of next links that fills in as requests arrive. Results are saved when first computed.
 
 - **Next** follows the stored link if there is one. Otherwise it computes one generation and stores the new board and the link together.
-- **Final** steps forward until a board's ID repeats. A still life repeats after one step and an oscillator after its period. The result is saved on the starting board, so the next request is a single lookup.
-- **N ahead** steps forward up to N. If the board starts repeating first, any later generation follows from arithmetic on the cycle. So asking a settled board for generation 10<sup>18</sup> takes milliseconds.
+- **Final** steps forward until a board's ID repeats or it reaches a board whose final state is already known. A still life repeats after one step and an oscillator after its period. The result is saved for every board on the way, so asking about the starting board or any board after it is a single lookup.
+- **N ahead** steps forward up to N. If the final state turns up first, any later generation follows from arithmetic on the cycle. So asking a settled board for generation 10<sup>18</sup> takes milliseconds.
+
+### Final states for every board on the way
+
+All boards on one run share the same final board and period. Only the steps differ, and they follow from each board's position on the run. A board before the final board counts down to it. A cycle member past the final board goes round the cycle once more to come back to it. So one run saves a final state for every board it stepped through, cycle members included, in one transaction.
+
+Each step of a run also checks whether the current board's final state is already known. If it is, the run stops there and adds that board's steps to its own. Two different starting boards whose futures meet only compute the shared part once. This can also answer a board that needs more than `MaxSteps` generations to settle, as long as it joins a known path within the limit. `MaxSteps` still caps the generations computed in one request.
+
+The extra check costs one key lookup per generation. On the random 256 x 256 board below it made no measurable difference. That run saved about 2,400 final state records, and the whole database stayed under 1 MB.
 
 ### The final state of an oscillator
 
 A cycle has several boards, so "the final state" needs one fixed answer. It is the cycle member with the smallest ID. Every board that leads into the same cycle then reports the same final board, which keeps the cache consistent. `steps` is how many generations it takes to first reach that board.
 
-Only boards whose IDs are returned to a client are stored. The intermediate boards of a long run are dropped, because an ID cannot be turned back into a board and nobody can ask for one they were never given.
+Only boards whose IDs are returned to a client are stored. The intermediate boards of a long run are dropped, because an ID cannot be turned back into a board and nobody can ask for one they were never given. Their final state records are kept, because they are keyed by ID alone. A later run computes the same IDs as it steps, and a client who uploads or reaches one of those boards later gets its final state straight away.
 
 ## Edge rules
 
@@ -46,7 +54,7 @@ Boards are stored in LMDB, an embedded key-value store, through the LightningDB 
 |---|---|
 | `board:{id}` | Format version, width, height, edge rule and the cells packed as bits. |
 | `next:{id}` | ID of the next generation. |
-| `final:{id}` | Steps, period and the ID of the final board. |
+| `final:{id}` | Steps, period and the ID of the final board. Written for every board a run passes through, so the board itself may not be stored. |
 
 Every lookup is by key, and every value is written once and never changes, so a key-value store fits better than a relational database. LMDB was chosen for four reasons.
 
@@ -57,7 +65,14 @@ Every lookup is by key, and every value is written once and never changes, so a 
 
 RocksDB was the main alternative. It is built for heavy write volume, which this service does not have. Microsoft's FASTER KV is faster still, but it saves to disk at checkpoints, so a crash can lose recent writes unless a checkpoint is forced before every response.
 
-An in-process cache sits in front of the store. Cached data can never be stale, because boards never change and their links only go from unknown to known.
+An in-process cache sits in front of the store. Boards never change and their links only go from unknown to known, so a cached entry can at worst be missing a link that was saved since.
+
+### Cache access pattern
+
+- **Read-through.** A read checks the in-memory cache by board ID first. On a miss it reads the board and its `next` and `final` records from LMDB in one read transaction and caches them together as one entry.
+- **Write to the store, then drop the cache entry.** Writes go straight to LMDB. Saving a link then removes the affected cache entries, so the next read loads the fresh record. Uploaded boards are not cached until they are first read.
+- **Bounded by size.** Each entry is charged its packed cells plus a fixed overhead, against `Storage:CacheSizeLimitBytes`. When an entry would go over the limit it is not cached, and about 5% of entries are evicted in the background, least recently used first.
+- **Final state lookups during a run.** These check the cache first and then LMDB. Most of them miss, because the boards are new, and an LMDB key lookup takes microseconds. Misses are not cached, because a missing final state can become known at any time.
 
 ## Browser UI
 
@@ -95,7 +110,7 @@ src/
   GameOfLife.Core            Domain logic with no I/O
     Board.cs                 Immutable board, packed cells, content-hash ID
     LifeEngine.cs            One generation under the B3/S23 rule, dead or wrapped edges
-    LifeSimulator.cs         Runs generations, detects cycles, skips ahead on a cycle
+    LifeSimulator.cs         Runs generations, detects cycles, stops at known final states
     BoardService.cs          The API operations, saving results as they are computed
     Storage/IBoardStore.cs   Storage interface
   GameOfLife.Infrastructure
@@ -113,5 +128,5 @@ tests/
 ## What I would do next
 
 - **Faster generations.** Packing 64 cells into each machine word lets one step compute many cells at once. Hashlife caches the future of repeated regions and suits very large patterns.
-- **Resume long runs.** Remember how far a board got before hitting the step limit, so a later request continues from there.
+- **Resume long runs.** Remember how far a board got before hitting the step limit, so a later request continues from there. The final state records along a path are a step towards this.
 - **Operations.** Rate limiting, metrics, a container image, and a retention policy for boards nobody has requested in a long time.

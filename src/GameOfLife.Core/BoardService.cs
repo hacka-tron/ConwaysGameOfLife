@@ -61,11 +61,11 @@ public sealed class BoardService(
         }
         else
         {
-            var run = simulator.Run(record.Board, generations, MaxSteps, cancellationToken)
+            var run = await simulator.RunAsync(record.Board, generations, MaxSteps, FindKnownFinalAsync, cancellationToken)
                 ?? throw LimitExceeded(id);
             if (run.Final is not null)
             {
-                await SaveFinalAsync(id, run.Final, cancellationToken);
+                await SaveFinalsAsync(id, run, cancellationToken);
             }
 
             result = run.BoardAtTarget!;
@@ -85,19 +85,41 @@ public sealed class BoardService(
             return new FinalState(board, known.Steps, known.Period);
         }
 
-        var run = simulator.Run(record.Board, target: null, MaxSteps, cancellationToken)
+        var run = await simulator.RunAsync(record.Board, target: null, MaxSteps, FindKnownFinalAsync, cancellationToken)
             ?? throw LimitExceeded(id);
-        var final = run.Final!;
-        await SaveFinalAsync(id, final, cancellationToken);
-        return final;
+        await SaveFinalsAsync(id, run, cancellationToken);
+        return run.Final!;
     }
 
-    private async Task SaveFinalAsync(string id, FinalState final, CancellationToken cancellationToken)
+    /// <summary>
+    /// Saves the final state of every board the run passed through, not just the one asked about.
+    /// A later run that reaches any of them can then stop there.
+    /// </summary>
+    private async Task SaveFinalsAsync(string id, SimulationResult run, CancellationToken cancellationToken)
     {
+        var final = run.Final!;
+        var boards = run.FinalStepsAlongPath().ToList();
+        if (boards.Count == 0)
+        {
+            // The run started on a board with a known final state, so there is nothing new to save.
+            return;
+        }
+
         logger.LogInformation(
-            "Board {BoardId} settles after {Steps} generations into a cycle of period {Period}",
-            id, final.Steps, final.Period);
-        await store.SaveFinalAsync(id, final, cancellationToken);
+            "Board {BoardId} settles after {Steps} generations into a cycle of period {Period}. Saving the final state of {Count} boards",
+            id, final.Steps, final.Period, boards.Count);
+        await store.SaveFinalsAsync(final.Board, final.Period, boards, cancellationToken);
+    }
+
+    private async ValueTask<FinalState?> FindKnownFinalAsync(string id, CancellationToken cancellationToken)
+    {
+        if (await store.GetFinalAsync(id, cancellationToken) is not { } known)
+        {
+            return null;
+        }
+
+        var board = await GetAsync(known.BoardId, cancellationToken);
+        return new FinalState(board, known.Steps, known.Period);
     }
 
     private async Task<BoardRecord> GetRecordAsync(string id, CancellationToken cancellationToken) =>

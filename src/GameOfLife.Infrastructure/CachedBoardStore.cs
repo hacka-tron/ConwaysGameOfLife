@@ -44,11 +44,19 @@ public sealed class CachedBoardStore(IBoardStore inner, long sizeLimitBytes) : I
         _cache.Remove(fromId);
     }
 
-    public async Task SaveFinalAsync(string fromId, FinalState final, CancellationToken cancellationToken)
+    public Task<StoredFinalState?> GetFinalAsync(string id, CancellationToken cancellationToken) =>
+        _cache.TryGetValue(id, out BoardRecord? cached) && cached!.Final is { } final
+            ? Task.FromResult<StoredFinalState?>(final)
+            : inner.GetFinalAsync(id, cancellationToken);
+
+    public async Task SaveFinalsAsync(Board finalBoard, int period, IReadOnlyCollection<BoardSteps> boards, CancellationToken cancellationToken)
     {
-        await inner.SaveFinalAsync(fromId, final, cancellationToken);
-        _cache.Remove(fromId);
-        _cache.Remove(final.Board.Id);
+        await inner.SaveFinalsAsync(finalBoard, period, boards, cancellationToken);
+        _cache.Remove(finalBoard.Id);
+        foreach (var board in boards)
+        {
+            _cache.Remove(board.BoardId);
+        }
     }
 
     public void Dispose() => _cache.Dispose();

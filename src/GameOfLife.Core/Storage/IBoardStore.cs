@@ -29,10 +29,18 @@ public interface IBoardStore
     Task SaveNextAsync(string fromId, Board next, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Stores the final board and records the final state of <paramref name="fromId"/>, atomically.
-    /// The final board is also recorded as its own final state.
+    /// The final state saved for <paramref name="id"/>, or <c>null</c> if none is known. This works for
+    /// boards that were passed through on the way to a final state but never stored themselves.
     /// </summary>
-    Task SaveFinalAsync(string fromId, FinalState final, CancellationToken cancellationToken);
+    Task<StoredFinalState?> GetFinalAsync(string id, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Stores the final board and records a final state for each of <paramref name="boards"/>, atomically.
+    /// They all lead to <paramref name="finalBoard"/> with the same <paramref name="period"/>, and only their
+    /// steps differ. The final board is also recorded as its own final state.
+    /// </summary>
+    /// <remarks>Only the final board itself is stored. The other boards get a final state record only.</remarks>
+    Task SaveFinalsAsync(Board finalBoard, int period, IReadOnlyCollection<BoardSteps> boards, CancellationToken cancellationToken);
 }
 
 /// <summary>The store has reached its configured maximum size.</summary>

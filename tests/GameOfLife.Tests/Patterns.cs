@@ -41,4 +41,14 @@ internal static class Patterns
         rows[2][0] = rows[2][1] = rows[2][2] = '#';
         return rows.Select(r => new string(r)).ToArray();
     }
+
+    /// <summary>A T tetromino in the middle of a square board.</summary>
+    public static string[] TOn(int size)
+    {
+        var rows = Enumerable.Range(0, size).Select(_ => new string('.', size).ToCharArray()).ToArray();
+        int mid = size / 2;
+        rows[mid][mid - 1] = rows[mid][mid] = rows[mid][mid + 1] = '#';
+        rows[mid + 1][mid] = '#';
+        return rows.Select(r => new string(r)).ToArray();
+    }
 }

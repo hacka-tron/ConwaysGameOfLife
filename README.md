@@ -55,7 +55,7 @@ Errors use RFC 7807 problem details.
 ## Design
 
 - **IDs are content hashes.** An ID is the first 128 bits of a SHA-256 of the board's size, edge rule and cells, written as 26 base32 characters. The same board always gets the same ID, so uploads are idempotent.
-- **Each result is computed once.** A board's next generation and final state are stored when first computed, and later requests are lookups.
+- **Each result is computed once.** A board's next generation and final state are stored when first computed, and later requests are lookups. Finding one board's final state also saves the final state of every board it passed through, and a later run stops as soon as it reaches any of them.
 - **Cycles are detected and skipped.** Final state is found when a board's ID repeats. For an oscillator it is the cycle member with the smallest ID, with the steps to reach it and the period. Generation N on a cycling board is found by arithmetic, so huge N is instant.
 - **Storage is durable.** LMDB, an embedded key-value store, commits every write to disk before the response, so data survives restarts and crashes.
 - **Limits are enforced.** Board size, step limit, storage size and request size are configurable and validated at startup. Boards that do not settle within the step limit return 422.

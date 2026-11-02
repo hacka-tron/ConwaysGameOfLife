@@ -82,14 +82,26 @@ public sealed class LmdbBoardStore : IBoardStore, IDisposable
         return Task.CompletedTask;
     }
 
-    public Task SaveFinalAsync(string fromId, FinalState final, CancellationToken cancellationToken)
+    public Task<StoredFinalState?> GetFinalAsync(string id, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        using var transaction = _environment.BeginTransaction(TransactionBeginFlags.ReadOnly);
+        return Task.FromResult(transaction.TryGet(_database, Key("final", id), out byte[]? value) ? DecodeFinal(value!) : null);
+    }
+
+    public Task SaveFinalsAsync(Board finalBoard, int period, IReadOnlyCollection<BoardSteps> boards, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         Write(transaction =>
         {
-            PutBoard(transaction, final.Board);
-            Put(transaction, Key("final", final.Board.Id), EncodeFinal(final.Board.Id, 0, final.Period));
-            Put(transaction, Key("final", fromId), EncodeFinal(final.Board.Id, final.Steps, final.Period));
+            // The final board is written before anything points at it, in the same commit.
+            PutBoard(transaction, finalBoard);
+            Put(transaction, Key("final", finalBoard.Id), EncodeFinal(finalBoard.Id, 0, period));
+            foreach (var board in boards)
+            {
+                Put(transaction, Key("final", board.BoardId), EncodeFinal(finalBoard.Id, board.Steps, period));
+            }
+
             return true;
         });
         return Task.CompletedTask;
