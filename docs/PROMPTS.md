@@ -589,3 +589,11 @@ The assistant measured one generation at about 0.24 ms for a 256 x 256 board in 
 ```
 
 The assistant confirmed the recommendation was for the default, a key board every 64 generations, kept as a setting so it can be changed.
+
+### 73
+
+```text
+also we wouldn't really want to keep the generations endpoint if we have this right? like we we would just use recipes and then calculate generation n from the correct recipe under the hood right?
+```
+
+The assistant recommended keeping the endpoint. Get N States Ahead is one of the four required operations in the assessment, and recipes are a storage detail behind it. A client cannot know the ID of the board N generations ahead without the server, so the endpoint stays the same and only its implementation changes to use recipes and skip links.
