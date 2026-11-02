@@ -412,3 +412,11 @@ also how much would it cost to save the whole board in memory
 ```
 
 The assistant worked out the cost of storing every board a run passes through instead of only its final state record. At the default 256 x 256 limit that is about 8 KB per board against about 70 bytes, so roughly 120 times more space for the same run.
+
+### 51
+
+```text
+so realistically if I wanted to save every possible board in the 256 x256 layout ahead of time would that be possible? I'm assuming a lot of these would overlap at some point
+```
+
+The assistant showed it is impossible. There are about 10 to the power 19,728 possible boards, and even the settled boards alone number more than 10 to the power 1,233, so convergence cannot bring the count anywhere near storable. Precomputing whole boards only works up to about 5 x 5. The overlap can be used locally instead, by caching the future of small regions as Hashlife does.
