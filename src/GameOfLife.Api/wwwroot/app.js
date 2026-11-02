@@ -6,6 +6,9 @@ const LOG_LIMIT = 50;
 // Requests faster than this never show a busy state, so quick clicks do not flash every control.
 const BUSY_DELAY_MS = 300;
 const MAX_CELL_PX = 40;
+// The first board is sized to fill the stage at this many pixels per cell, so there is room to draw.
+const START_CELL_PX = 16;
+const MIN_START_SIDE = 16;
 const GRID_MIN_CELL_PX = 6;
 const RANDOM_DENSITY = 0.3;
 // Keep in sync with the 900px breakpoint in styles.css.
@@ -515,12 +518,52 @@ function availableSize() {
   return { width, height };
 }
 
+function cellFor(width, height) {
+  const fit = Math.min(width / state.width, height / state.height);
+  // Whole pixels keep cells even. Below 2px per cell, fractional sizes let 256 columns fit a phone.
+  return fit >= 2 ? Math.min(MAX_CELL_PX, Math.floor(fit)) : Math.max(fit, 0.25);
+}
+
+// Space the play button takes in the stage's bottom left corner, measured from the content box.
+function playRoom() {
+  const styles = getComputedStyle(el.stage);
+  const gap = 8;
+  return {
+    width: el.play.offsetLeft - parseFloat(styles.paddingLeft) + el.play.offsetWidth + gap,
+    height: el.stage.clientHeight - parseFloat(styles.paddingBottom) - el.play.offsetTop + gap,
+  };
+}
+
+// On wide screens the board uses the whole stage, and the play button floats over its bottom left
+// corner. A centered board usually leaves room for the button beside or below it. When it would not,
+// the board moves up or right just far enough to clear it, whichever keeps the cells larger. On
+// phones the stage reserves a strip for the button in styles.css instead.
 function layoutCanvas() {
   const avail = availableSize();
-  const fit = Math.min(avail.width / state.width, avail.height / state.height);
-  // Whole pixels keep cells even. Below 2px per cell, fractional sizes let 256 columns fit a phone.
-  view.cell = fit >= 2 ? Math.min(MAX_CELL_PX, Math.floor(fit)) : Math.max(fit, 0.25);
+  let cell = cellFor(avail.width, avail.height);
+  let dodge = '';
+  if (WIDE_QUERY.matches) {
+    const room = playRoom();
+    const clear =
+      (avail.width - state.width * cell) / 2 >= room.width || (avail.height - state.height * cell) / 2 >= room.height;
+    if (!clear) {
+      const up = cellFor(avail.width, avail.height - room.height);
+      const right = cellFor(avail.width - room.width, avail.height);
+      dodge = up >= right ? 'up' : 'right';
+      cell = Math.max(up, right);
+    }
+  }
+  el.stage.dataset.dodge = dodge;
+  view.cell = cell;
   draw();
+}
+
+// Sizes the first board to the stage, so a wide screen gets a wide board instead of empty margins.
+function fitStartSize() {
+  const avail = availableSize();
+  const room = WIDE_QUERY.matches ? playRoom() : { width: 0, height: 0 };
+  const side = (px) => Math.min(MAX_SIDE, Math.max(MIN_START_SIDE, Math.floor(px / START_CELL_PX)));
+  resize(side(avail.width), side(avail.height - room.height));
 }
 
 // Star radius and glow blur as shares of the cell. Newborns are the largest and brightest.
@@ -816,6 +859,12 @@ function showInfo(target, text, kind = 'info') {
   target.hidden = false;
 }
 
+// Like showInfo, but leaves the page alone when the same message is already showing.
+function showSame(target, text) {
+  if (!target.hidden && target.dataset.kind === 'info' && target.textContent === text) return;
+  showInfo(target, text);
+}
+
 function showProblem(target, problem) {
   const head = document.createElement('div');
   head.className = 'msg-title';
@@ -1007,8 +1056,9 @@ async function fetchNext() {
   return result;
 }
 
+// The operations message is replaced only once the answer is in. Hiding it on click and showing the
+// same still life message again a moment later made the side panel jump on every press.
 function nextGeneration() {
-  hideMsg(el.opsMsg);
   hideMsg(el.loadMsg);
   return runBusy(el.next, async () => {
     const s = await ensureStored(el.opsMsg);
@@ -1018,9 +1068,8 @@ function nextGeneration() {
     if (!result.ok) return showProblem(el.opsMsg, result.problem);
     setCurrent(result.data, { gen: s.gen === null ? null : s.gen + 1n });
     showFinalIfReached();
-    if (result.data.id === s.id) {
-      showInfo(el.opsMsg, settledMessage());
-    }
+    if (result.data.id === s.id) showSame(el.opsMsg, settledMessage());
+    else hideMsg(el.opsMsg);
   });
 }
 
@@ -1527,6 +1576,7 @@ new ResizeObserver(() => {
 window.addEventListener('resize', layoutCanvas);
 
 applySpeeds();
+fitStartSize();
 placePreset(PRESETS.find((p) => p.key === 'glider'));
 hideMsg(el.boardMsg);
 layoutCanvas();

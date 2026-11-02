@@ -329,8 +329,7 @@ input {
   place-items: center;
   flex: 1;
   min-height: 0;
-  /* The bottom padding keeps the board clear of the play button. */
-  padding: 18px 18px 76px;
+  padding: 18px;
   border: 1px solid var(--border);
   border-radius: var(--radius-large);
   background-color: var(--stage-bg);
@@ -348,6 +347,23 @@ input {
   /* See-through, so the nebulae show between the stars while the board edge stays visible. */
   background: var(--canvas-bg);
   box-shadow: 0 0 0 1px var(--border);
+}
+
+/* Below the wide breakpoint the stage grows with the board, so it keeps a strip below it for the
+   play button. Keep this breakpoint in sync with WIDE_QUERY in app.js. */
+@media (max-width: 899px) {
+  .stage {
+    padding-bottom: 76px;
+  }
+}
+
+/* Set by layoutCanvas when a board would sit under the play button. */
+.stage[data-dodge="up"] canvas {
+  align-self: start;
+}
+
+.stage[data-dodge="right"] canvas {
+  justify-self: end;
 }
 
 .stage canvas.is-locked {
