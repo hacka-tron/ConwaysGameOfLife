@@ -11,8 +11,8 @@ namespace GameOfLife.Api;
 /// <remarks>
 /// Each client IP address gets a token bucket that refills at <see cref="GameOfLifeOptions.MaxBoardsPerSecond"/>
 /// and holds up to twice <see cref="GameOfLifeOptions.MaxBatchSize"/>. That is the most the browser UI
-/// ever buffers ahead, so the UI at its top speed never hits the limit, while a script asking for more
-/// than that rate is slowed to it. Buckets for clients that go quiet are dropped automatically.
+/// ever buffers ahead, so continuous play at the UI's top speed never hits the limit, while a script
+/// asking for more than that rate is slowed to it. Buckets for clients that go quiet are dropped automatically.
 /// Behind a reverse proxy every client shares the proxy's address, so the proxy would need to forward
 /// the client address for the limit to be per client.
 /// </remarks>

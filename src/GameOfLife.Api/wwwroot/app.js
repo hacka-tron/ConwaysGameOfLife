@@ -23,8 +23,12 @@ const DEFAULT_SPEED = 4;
 //   refill when buffered boards <= speed x BUFFER_ROUND_TRIPS x round trip
 //   batch size = speed x BATCH_SECONDS, between MIN_BATCH and the server's MaxBatchSize
 // The round trip is the slowest of the last few batches, so one slow answer raises the refill point.
+// A failed batch is retried once before playback stops.
+const MAX_FAILED_BATCHES = 2;
 const BUFFER_ROUND_TRIPS = 2;
 const BATCH_SECONDS = 3;
+// The first batch after Play is smaller, so the first frame does not wait for a full batch.
+const FIRST_BATCH_SECONDS = 1;
 const MIN_BATCH = 10;
 const MIN_REFILL_AT = 2;
 const DEFAULT_ROUND_TRIP_MS = 300;
@@ -149,6 +153,8 @@ const state = {
   // Buffered boards for Play. Replaced on every Play and dropped by stopPlay, so answers that arrive
   // after the board changed are ignored.
   playback: null,
+  // The buffer kept by Pause, with the board it was paused on. Play on the same board picks it up again.
+  parked: null,
   // From GET /settings. These defaults match the server's and apply until it answers.
   limits: { maxBoardsPerSecond: 30, maxBatchSize: 120 },
   speeds: [],
@@ -1039,9 +1045,9 @@ function refillAt(rate, roundTripMs) {
 }
 
 // How many boards to ask for in one batch.
-function batchSize(rate) {
+function batchSize(rate, seconds = BATCH_SECONDS) {
   const max = state.limits.maxBatchSize;
-  return clamp(Math.ceil(rate * BATCH_SECONDS), Math.min(MIN_BATCH, max), max);
+  return clamp(Math.ceil(rate * seconds), Math.min(MIN_BATCH, max), max);
 }
 
 function roundTripMs(playback) {
@@ -1074,20 +1080,50 @@ async function startPlay() {
   }
   state.playing = true;
   state.busy = true;
-  // cursor is the last board fetched, which the next batch starts from. loop holds the boards to
-  // repeat once the server says the sequence repeats, after which no more requests are needed.
-  state.playback = { queue: [], cursor: storedAsResponse(), fetching: false, roundTrips: [], loop: null, error: null, retryAt: 0 };
+  // Boards are content-addressed, so a buffer parked on this exact board still holds its future.
+  const parked = state.parked;
+  state.parked = null;
+  state.playback = parked?.boardId === state.stored.id ? parked.playback : newPlayback();
   updateUI();
   startRun();
   fillBuffer();
   state.playTimer = setTimeout(playStep, currentDelay());
 }
 
-function stopPlay(message) {
+// cursor is the last board fetched, which the next batch starts from. loop holds the boards to repeat
+// once the server says the sequence repeats, after which no more requests are needed. fetchId tells a
+// batch that answers after a pause apart from the current one.
+function newPlayback() {
+  return {
+    queue: [],
+    cursor: storedAsResponse(),
+    fetching: false,
+    fetchId: 0,
+    fetched: false,
+    roundTrips: [],
+    loop: null,
+    error: null,
+    failures: 0,
+    retryAt: 0,
+    waitShown: false,
+  };
+}
+
+// Pause passes keepBuffer, so pressing Play again on the same board does not fetch it all again.
+// Every other stop drops the buffer.
+function stopPlay(message, { keepBuffer = false } = {}) {
   if (!state.playing) return;
+  const pb = state.playback;
   state.playing = false;
   state.busy = false;
   state.playback = null;
+  state.parked = null;
+  if (keepBuffer && pb) {
+    // A batch still in flight is dropped when it answers, and fetched again after Play.
+    pb.fetchId++;
+    pb.fetching = false;
+    state.parked = { playback: pb, boardId: state.stored.id };
+  }
   clearTimeout(state.playTimer);
   state.playTimer = 0;
   if (message) showInfo(el.opsMsg, message);
@@ -1103,11 +1139,13 @@ async function fillBuffer() {
   if (pb.queue.length > refillAt(rate, roundTripMs(pb))) return;
 
   pb.fetching = true;
+  const fetchId = ++pb.fetchId;
   const from = pb.cursor;
+  const count = batchSize(rate, pb.fetched ? BATCH_SECONDS : FIRST_BATCH_SECONDS);
   const started = performance.now();
-  const result = await api('GET', `/boards/${encodeURIComponent(from.id)}/sequence?count=${batchSize(rate)}`);
+  const result = await api('GET', `/boards/${encodeURIComponent(from.id)}/sequence?count=${count}`);
   // Paused, edited or replaced while the request was in flight. Drop the result.
-  if (state.playback !== pb) return;
+  if (state.playback !== pb || pb.fetchId !== fetchId) return;
   pb.fetching = false;
   pb.roundTrips.push(performance.now() - started);
   if (pb.roundTrips.length > ROUND_TRIP_SAMPLES) pb.roundTrips.shift();
@@ -1115,10 +1153,13 @@ async function fillBuffer() {
   if (!result.ok || !isSequenceResponse(result.data)) {
     // Playback carries on from the buffer and tries again later. It only stops if the buffer runs out.
     pb.error = result.ok ? badResponse(result.status) : result.problem;
+    pb.failures++;
     pb.retryAt = performance.now() + 1000 * (pb.error.retryAfterSeconds ?? 1);
     return;
   }
   pb.error = null;
+  pb.failures = 0;
+  pb.fetched = true;
   const { boards, repeatsFrom } = result.data;
   pb.queue.push(...boards);
   if (boards.length) pb.cursor = boards[boards.length - 1];
@@ -1141,21 +1182,34 @@ function playStep() {
       stopPlay('The next generation has the same ID as this one, so the board is a still life. Playback stopped.');
       return;
     }
+    if (pb.waitShown) {
+      hideMsg(el.opsMsg);
+      pb.waitShown = false;
+    }
     setCurrent(next, { gen: s.gen === null ? null : s.gen + 1n });
     showFinalIfReached();
-  } else if (pb.error && !pb.fetching && pb.error.status !== 429) {
-    // The buffer ran out and the last batch failed. A rate limit answer just waits for its retry time.
-    const problem = pb.error;
-    stopPlay();
-    showProblem(el.opsMsg, problem);
-    return;
+  } else if (pb.error && !pb.fetching) {
+    // The buffer ran out and the last batch failed. A rate limit answer waits for its retry time and
+    // says so. Any other failure gets one retry, then playback stops.
+    if (pb.error.status === 429) {
+      if (!pb.waitShown) {
+        const seconds = Math.max(1, Math.ceil((pb.retryAt - performance.now()) / 1000));
+        showInfo(el.opsMsg, `The server's limit of ${state.limits.maxBoardsPerSecond} boards per second was reached. Playback resumes in about ${plural(seconds, 'second', 'seconds')}.`);
+        pb.waitShown = true;
+      }
+    } else if (pb.failures >= MAX_FAILED_BATCHES) {
+      const problem = pb.error;
+      stopPlay();
+      showProblem(el.opsMsg, problem);
+      return;
+    }
   }
   fillBuffer();
   state.playTimer = setTimeout(playStep, currentDelay());
 }
 
 el.play.addEventListener('click', () => {
-  if (state.playing) stopPlay();
+  if (state.playing) stopPlay(undefined, { keepBuffer: true });
   else startPlay();
 });
 
