@@ -484,3 +484,11 @@ ok that isn't necessary, it should happend when we load the board or a new board
 ```
 
 The UI now asks for a board's final state as soon as the board is loaded or saved, instead of on the first Next, Jump or Play. That one answer is reused by every later step and by Find final state on the same board.
+
+### 60
+
+```text
+also I notice a weird behavior when i click load, and then draw something on teh board, the final state that shows up is for what was loaded, not for what was later drawn, so we need to keep the state of the board clear, basically whatever was last drawn is what the final state will be tailored for, so the final state diagram should only show up for that.
+```
+
+The assistant repeated these steps in the browser on the current code. It loaded a block, drew a blinker beside it and pressed Play, and the Final state panel described the drawn board, not the loaded one. The fix from prompt 58, where every edit starts a new run, already covered this, so no further change was needed.
