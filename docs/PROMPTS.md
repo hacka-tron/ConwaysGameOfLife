@@ -533,3 +533,11 @@ on the server side, can't we just save the hashes of the different boards, and o
 ```
 
 The assistant explained that a hash cannot be turned back into a board, so each saved ID would need a recipe, meaning a stored ancestor board and how many generations to step from it. Uploads would be stored in full and every other board as a recipe, with a full checkpoint every 100 or so generations to cap the replay. That cuts storage about 60 times at 256 x 256, in exchange for up to about 100 ms of recomputing when a board is read.
+
+### 66
+
+```text
+cant we make a 2 way hash?
+```
+
+The assistant explained that a two-way hash is really an encoding of the board, so it must be at least as long as the board's information. That is up to 65,536 bits, or about 13,000 characters, for a 256 x 256 board, which is too long for a URL. Compression makes sparse boards short, but random boards stay large. A hybrid could use the compressed board as the ID when it is short and a hash otherwise, at the cost of two ID formats.
