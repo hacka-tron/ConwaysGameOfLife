@@ -573,3 +573,11 @@ Add the compression for both storage and response
 ```
 
 Stored boards are now Brotli-compressed when that makes them smaller, and API responses are compressed with Brotli or gzip. A played 256 x 256 board takes about 7.9 KB on disk instead of about 21 KB, and a batch of 90 boards travels as about 1 MB instead of about 12 MB. Boards saved before the change still load, and board IDs are unchanged. An independent review approved it.
+
+### 71
+
+```text
+I like the recipe design, can you reccomend a recipe size given how taxing it is to compute between generations?
+```
+
+The assistant measured one generation at about 0.24 ms for a 256 x 256 board in a release build, and loading a compressed key board at about 0.02 ms. It recommended a key board every 64 generations. A cold read then replays at most 63 generations, about 15 ms, which is under one screen frame, and storage averages about 100 to 175 bytes per board. Larger intervals save only a few more bytes per board while making reads several times slower.
