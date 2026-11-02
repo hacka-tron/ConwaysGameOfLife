@@ -597,3 +597,11 @@ also we wouldn't really want to keep the generations endpoint if we have this ri
 ```
 
 The assistant recommended keeping the endpoint. Get N States Ahead is one of the four required operations in the assessment, and recipes are a storage detail behind it. A client cannot know the ID of the board N generations ahead without the server, so the endpoint stays the same and only its implementation changes to use recipes and skip links.
+
+### 74
+
+```text
+also most boards arent 256x256 that is the cap, most are much smaller, like 32*48 or something like that, so find a good recipe default given that size
+```
+
+The assistant measured random 32 x 48 boards. They settle in about 300 generations, step in about 0.005 ms, and store in about 120 bytes compressed, which is already close to the size of a recipe. It kept 64 generations as the default interval, since even a 63-generation replay takes about 0.3 ms at that size. It pointed out that recipes only halve storage for boards this small, and recommended storing boards under about 1 KB compressed in full and using recipes only for larger boards.
